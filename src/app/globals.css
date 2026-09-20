@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0f1a;
+  --foreground: #e8eef7;
+  --card: #111827;
+  --card-hover: #1a2332;
+  --border: #1e293b;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --accent: #06b6d4;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+.animate-slide-in {
+  animation: slideIn 0.35s ease-out forwards;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa 0%, #22d3ee 50%, #34d399 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glass {
+  background: rgba(17, 24, 39, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+.chat-user {
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
+}
+.chat-ai {
+  background: #1e293b;
+  border: 1px solid #334155;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+.badge-qualified { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.badge-review { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.badge-new { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.badge-handoff { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+
+.flow-node {
+  transition: all 0.25s ease;
+}
+.flow-node:hover, .flow-node.active {
+  transform: scale(1.03);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.table-row:hover {
+  background: rgba(30, 41, 59, 0.5);
+}
