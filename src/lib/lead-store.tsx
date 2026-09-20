@@ -17,6 +17,7 @@ export type SessionLeadStatus = "Qualified" | "Handed Off";
 export interface SessionLead {
   id: string;
   createdAt: string;
+  updatedAt: string;
   buyOrRent: string;
   propertyType: string;
   budget: string;
@@ -27,9 +28,10 @@ export interface SessionLead {
   priority: LeadPriority;
   handedOffAt?: string;
   name: string;
+  fingerprint: string;
 }
 
-const STORAGE_KEY = "webcraftpro_session_leads_v1";
+const STORAGE_KEY = "webcraftpro_session_leads_v2";
 
 /** DEMO LOGIC — transparent priority heuristics for the investor demo only. */
 export function computePriority(c: {
@@ -52,6 +54,30 @@ export function computePriority(c: {
   if (rent && hasBudget) return "Medium";
   if (buy && hasBudget) return "Medium";
   return "Low";
+}
+
+function norm(s: string | undefined): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Fingerprint of qualification fields so the same demo answer updates one record. */
+export function leadFingerprint(c: {
+  buyOrRent?: string;
+  propertyType?: string;
+  budget?: string;
+  location?: string;
+  preferredLocation?: string;
+  timeline?: string;
+}): string {
+  const loc = c.preferredLocation ?? c.location;
+  return [norm(c.buyOrRent), norm(c.propertyType), norm(c.budget), norm(loc), norm(c.timeline)].join(
+    "|"
+  );
 }
 
 function loadLeads(): SessionLead[] {
@@ -98,6 +124,14 @@ export function LeadProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    try {
+      const old = localStorage.getItem("webcraftpro_session_leads_v1");
+      if (old && !localStorage.getItem(STORAGE_KEY)) {
+        localStorage.removeItem("webcraftpro_session_leads_v1");
+      }
+    } catch {
+      /* ignore */
+    }
     setSessionLeads(loadLeads());
     setHydrated(true);
   }, []);
@@ -107,12 +141,38 @@ export function LeadProvider({ children }: { children: ReactNode }) {
   }, [sessionLeads, hydrated]);
 
   const addQualifiedLead = useCallback((c: Collected): SessionLead => {
-    let created!: SessionLead;
+    const fp = leadFingerprint(c);
+    const now = new Date().toISOString();
+    let result!: SessionLead;
+
     setSessionLeads((prev) => {
+      const existingIdx = prev.findIndex((l) => l.fingerprint === fp);
+      if (existingIdx >= 0) {
+        const prevLead = prev[existingIdx];
+        result = {
+          ...prevLead,
+          updatedAt: now,
+          buyOrRent: c.buyOrRent || prevLead.buyOrRent,
+          propertyType: c.propertyType || prevLead.propertyType,
+          budget: c.budget || prevLead.budget,
+          preferredLocation: c.location || prevLead.preferredLocation,
+          timeline: c.timeline || prevLead.timeline,
+          status: "Qualified",
+          priority: computePriority(c),
+          handedOffAt: undefined,
+          name: `AI Lead \u00b7 ${c.location || c.propertyType || "New"}`,
+          fingerprint: fp,
+        };
+        const next = [...prev];
+        next.splice(existingIdx, 1);
+        return [result, ...next];
+      }
+
       const id = nextId(prev);
-      created = {
+      result = {
         id,
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         buyOrRent: c.buyOrRent || "\u2014",
         propertyType: c.propertyType || "\u2014",
         budget: c.budget || "\u2014",
@@ -122,17 +182,24 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         source: "AI Agent",
         priority: computePriority(c),
         name: `AI Lead \u00b7 ${c.location || c.propertyType || "New"}`,
+        fingerprint: fp,
       };
-      return [created, ...prev];
+      return [result, ...prev];
     });
-    return created;
+
+    return result;
   }, []);
 
   const handoffLead = useCallback((id: string) => {
     setSessionLeads((prev) =>
       prev.map((l) =>
         l.id === id
-          ? { ...l, status: "Handed Off" as const, handedOffAt: new Date().toISOString() }
+          ? {
+              ...l,
+              status: "Handed Off" as const,
+              handedOffAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
           : l
       )
     );
@@ -141,6 +208,12 @@ export function LeadProvider({ children }: { children: ReactNode }) {
   const clearSessionLeads = useCallback(() => {
     setSessionLeads([]);
     saveLeads([]);
+    try {
+      localStorage.removeItem("webcraftpro_session_leads_v1");
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const latestLead = sessionLeads[0] ?? null;
