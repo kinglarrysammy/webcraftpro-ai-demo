@@ -38,7 +38,7 @@ const STEPS = [
 ];
 
 export default function AutomationPage() {
-  const { latestLead } = useLeadStore();
+  const { latestLead, clearSessionLeads } = useLeadStore();
   const [manualActive, setManualActive] = useState<number | null>(null);
 
   const completedThrough = useMemo(() => {
@@ -69,6 +69,14 @@ export default function AutomationPage() {
             <Link href="/crm" className="underline hover:text-emerald-300">
               Open CRM
             </Link>
+            {" · "}
+            <button
+              type="button"
+              onClick={() => clearSessionLeads()}
+              className="underline hover:text-emerald-300"
+            >
+              Clear session
+            </button>
           </p>
         ) : (
           <p className="mt-3 text-xs text-slate-500">

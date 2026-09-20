@@ -23,7 +23,7 @@ type CrmRow =
   | { kind: "demo"; lead: Lead };
 
 export default function CRMPage() {
-  const { sessionLeads } = useLeadStore();
+  const { sessionLeads, clearSessionLeads } = useLeadStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const rows: CrmRow[] = useMemo(() => {
@@ -52,15 +52,31 @@ export default function CRMPage() {
             DEMO MODE — client-side CRM simulation
           </span>
         </p>
-        {sessionLeads.length > 0 && (
-          <p className="mt-2 text-xs text-emerald-400/90">
-            {sessionLeads.length} lead{sessionLeads.length > 1 ? "s" : ""} from AI Agent session
-            {" · "}
-            <Link href="/agent" className="underline hover:text-emerald-300">
-              Open agent
-            </Link>
-          </p>
-        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {sessionLeads.length > 0 && (
+            <p className="text-xs text-emerald-400/90">
+              {sessionLeads.length} session lead{sessionLeads.length > 1 ? "s" : ""} from AI Agent
+              {" · "}
+              <Link href="/agent" className="underline hover:text-emerald-300">
+                Open agent
+              </Link>
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              clearSessionLeads();
+              setSelectedId(null);
+            }}
+            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition"
+            title="Remove leads created in this browser demo session"
+          >
+            Clear Session Leads
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-slate-500">
+          Clears AI Agent session records only. Static DEMO DATA samples are kept.
+        </p>
       </div>
 
       <div className="grid lg:grid-cols-5 gap-6">
