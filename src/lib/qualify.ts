@@ -84,7 +84,7 @@ export function parseBudget(text: string): string | null {
   const monthly = /\b(per\s+month|\/\s*mo|a\s+month|monthly|\/month|par\s+mois|\/\s*mois)\b/i.test(t);
 
   const rangeWord = t.match(
-    /(?:between|from|around|entre|de)?\s*([\d\s.,]+)\s*(k|m|b|thousand|million|millions|milliard|milliards|mil|mille)?\s*(?:[-\u2013\u2014]|to|and|et)\s*([\d\s.,]+)\s*(k|m|b|thousand|million|millions|milliard|milliards|mil|mille)?(?:\s*(?:de\s+)?(?:mad|dirhams?|dh|usd|dollars?|eur|euros?))?/i
+    /(?:between|from|around|entre|de)?\s*([\d\s.,]+)\s*(k|m|b|thousand|million|millions|milliard|milliards|mil|mille)?\s*(?:[\u2013\u2014-]|to|and|et)\s*([\d\s.,]+)\s*(k|m|b|thousand|million|millions|milliard|milliards|mil|mille)?(?:\s*(?:de\s+)?(?:mad|dirhams?|dh|usd|dollars?|eur|euros?))?/i
   );
   if (rangeWord) {
     const scale2 = rangeWord[4] || rangeWord[2];
@@ -92,6 +92,7 @@ export function parseBudget(text: string): string | null {
     const a = parseAmount(rangeWord[1], scale1);
     const b = parseAmount(rangeWord[3], scale2);
     if (a != null && b != null) {
+      if (!currency && Math.max(a, b) >= 100_000) currency = "MAD";
       return `${formatAmount(a, currency)}\u2013${formatAmount(b, currency)}`;
     }
   }
@@ -214,13 +215,15 @@ export function extractSignals(text: string): Partial<Collected> {
   const rentRe =
     /\b(rent|renting|rental|lease|leasing|louer|location|locatif|locative)\b/i;
   const unsureBuyRent =
-    /\b(je ne sais pas|pas encore|ne sais pas encore|don'?t know|not sure).{0,40}\b(acheter|louer|buy|rent|achat|location)\b/i.test(
+    /\b(je ne sais pas|pas encore|ne sais pas encore|pas encore s[u\u00fb]r|pas s[u\u00fb]r|don'?t know|not sure).{0,80}/i.test(
       text
     ) ||
-    /\b(si je vais|whether (to|i)|acheter ou louer|buy or rent)\b/i.test(t);
+    /\b(si je vais|whether (to|i)|acheter ou (peut[-\s]?[e\u00ea]tre )?louer|buy or (maybe )?rent|ou peut[-\s]?[e\u00ea]tre louer)\b/i.test(
+      t
+    );
 
   if (unsureBuyRent) {
-    // leave empty
+    // leave buyOrRent empty — agent asks
   } else if (buyRe.test(t) && !rentRe.test(t)) {
     out.buyOrRent = "Buy";
   } else if (rentRe.test(t) && !buyRe.test(t)) {
@@ -287,30 +290,44 @@ export function extractSignals(text: string): Partial<Collected> {
   }
 
   const tNorm = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
   const notUrgent =
-    /\b(pas urgent|sans urgence|pas presse|je ne suis pas presse|ne suis pas presse|pas de delai|pas de delai precis|quand j['']aurai trouve|no rush|not urgent|not in a hurry|whenever|flexible on timing)\b/i.test(
+    /\b(pas urgent|sans urgence|aucune urgence|pas presse|je ne suis pas presse|ne suis pas presse|pas de delai|pas de delai precis|quand j['']aurai trouve|no rush|not urgent|not in a hurry|whenever|flexible on timing|\bflexible\b)\b/i.test(
+      tNorm
+    ) ||
+    /\b(je )?peux attendre\b/i.test(tNorm) ||
+    /\battendre (quelques|plusieurs)\b/i.test(tNorm);
+
+  const fewMonthsFlexible =
+    /\b(quelques mois|plusieurs mois|dans quelques mois|dans plusieurs mois|prochainement|next (few|couple of) months|plus tard)\b/i.test(
       tNorm
     );
+
   const nextYear = /\b(next year|l['']ann[e\u00e9]e prochaine|an prochain)\b/i.test(t);
   const asap =
     !notUrgent &&
+    !fewMonthsFlexible &&
     /\b(asap|immediately|right away|urgent|imm[e\u00e9]diatement|d[e\u00e8]s que possible|au plus vite|rapidement)\b/i.test(
       t
     );
 
-  if (notUrgent) {
-    out.timeline = "Flexible / Not urgent";
+  if (notUrgent || fewMonthsFlexible) {
+    if (fewMonthsFlexible || /\bquelques mois\b/i.test(tNorm)) {
+      out.timeline = "Flexible / Within a few months";
+    } else {
+      out.timeline = "Flexible / Not urgent";
+    }
   } else if (asap) {
     out.timeline = "Immediate / ASAP";
   } else if (nextYear) {
     out.timeline = "Flexible / Around next year";
   } else if (/\b(this month|within (a |1 |one )?month|30 days|ce mois)\b/i.test(t)) {
     out.timeline = "Within 30 days";
-  } else if (/\b(dans quelques mois|prochainement|next (few|couple of) months|1[-\u2013\u2014]3 months)\b/i.test(t)) {
+  } else if (/\b(1[\u2013\u2014-]3 months)\b/i.test(t)) {
     out.timeline = "1\u20133 months";
-  } else if (/\b(3[-\u2013\u2014]6 months|cette ann[e\u00e9]e|this (year|summer|fall))\b/i.test(t)) {
+  } else if (/\b(3[\u2013\u2014-]6 months|cette ann[e\u00e9]e|this (year|summer|fall))\b/i.test(t)) {
     out.timeline = "3\u20136 months";
-  } else if (/\b(6\+?\s*months|no rush)\b/i.test(t)) {
+  } else if (/\b(6\+?\s*months)\b/i.test(t)) {
     out.timeline = "6+ months / flexible";
   } else {
     const tm =
