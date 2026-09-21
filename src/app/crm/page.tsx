@@ -113,6 +113,7 @@ export default function CRMPage() {
                   {isSession ? (
                     <p className="text-xs text-emerald-500/80">
                       Source: AI Agent · Priority: {row.lead.priority}
+                      {row.lead.followUpCreated ? " · Follow-up created" : ""}
                     </p>
                   ) : (
                     <p className="text-xs text-slate-500">
@@ -162,7 +163,10 @@ export default function CRMPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-400 text-xs">
                         {isSession ? (
-                          <span className="text-emerald-400">AI Agent</span>
+                          <span className="text-emerald-400">
+                            AI Agent
+                            {row.lead.followUpCreated ? " · FU" : ""}
+                          </span>
                         ) : (
                           <span className="text-slate-500">DEMO DATA</span>
                         )}
@@ -233,7 +237,32 @@ export default function CRMPage() {
                           : "Not yet"}
                       </dd>
                     </div>
+                    <div>
+                      <dt className="text-slate-500 text-xs uppercase tracking-wide">Sales Follow-up</dt>
+                      <dd className="text-slate-200 mt-0.5">
+                        {selected.lead.followUpCreated
+                          ? `Created${selected.lead.followUpCreatedAt ? ` · ${new Date(selected.lead.followUpCreatedAt).toLocaleString()}` : ""}`
+                          : "Not yet"}
+                      </dd>
+                    </div>
+                    {selected.lead.followUpCreated && (
+                      <div>
+                        <dt className="text-slate-500 text-xs uppercase tracking-wide">Recommended action</dt>
+                        <dd className="text-slate-200 mt-0.5">
+                          {selected.lead.followUpRecommendedAction || "Contact lead"}
+                        </dd>
+                      </div>
+                    )}
+                    {selected.lead.followUpStatus && (
+                      <div>
+                        <dt className="text-slate-500 text-xs uppercase tracking-wide">Follow-up status</dt>
+                        <dd className="text-slate-200 mt-0.5">{selected.lead.followUpStatus}</dd>
+                      </div>
+                    )}
                   </dl>
+                  <p className="mt-3 text-[11px] text-slate-500">
+                    DEMO MODE — no real email, SMS, or WhatsApp is sent
+                  </p>
                 </>
               ) : (
                 <>
