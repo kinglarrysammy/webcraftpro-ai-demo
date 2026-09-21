@@ -33,55 +33,67 @@ const STEPS = [
   {
     id: "followup",
     title: "Sales Follow-up",
-    desc: "Sales receives next action — schedule viewing, send listings, or call. Not implemented in this demo.",
+    desc: "Sales receives a clear next action — e.g. contact the lead. Simulated in this demo only.",
   },
 ] as const;
 
 /**
- * Completion is derived only from the session lead — never from Next/Previous navigation.
- * Indices: 0 New Lead, 1 AI Qualification, 2 5/5 Qualified, 3 CRM, 4 Human Handoff, 5 Sales Follow-up
- * Sales Follow-up (5) is never marked complete in this demo.
+ * Completion from session lead only — never from Next/Previous.
+ * Sales Follow-up completes only after Create Follow-up is clicked.
  */
 function completedStageIndices(lead: {
   status: string;
   handedOffAt?: string;
+  followUpCreated?: boolean;
 } | null): Set<number> {
   const done = new Set<number>();
   if (!lead) return done;
 
-  // Session lead exists in CRM → stages 0–3 complete
-  done.add(0); // New Lead
-  done.add(1); // AI Qualification
-  done.add(2); // 5/5 Qualified
-  done.add(3); // CRM Record Created
+  done.add(0);
+  done.add(1);
+  done.add(2);
+  done.add(3);
 
-  const handedOff =
-    lead.status === "Handed Off" ||
-    !!(lead as { handoffStatus?: string }).handoffStatus === true ||
-    (typeof (lead as { handoffStatus?: string }).handoffStatus === "string" &&
-      /sent|handed/i.test((lead as { handoffStatus?: string }).handoffStatus || ""));
-
-  if (handedOff || lead.handedOffAt) {
-    done.add(4); // Human Handoff
+  if (lead.status === "Handed Off" || lead.handedOffAt) {
+    done.add(4);
   }
 
-  // Index 5 Sales Follow-up intentionally never auto-completed
+  if (lead.followUpCreated) {
+    done.add(5);
+  }
+
   return done;
 }
 
 export default function AutomationPage() {
-  const { latestLead, clearSessionLeads } = useLeadStore();
+  const { latestLead, clearSessionLeads, createFollowUp } = useLeadStore();
   const [selected, setSelected] = useState<number | null>(null);
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
 
   const completed = useMemo(() => completedStageIndices(latestLead), [latestLead]);
 
-  // Default selection: last completed stage, or 0 if none
   const defaultSelected = useMemo(() => {
     if (completed.size === 0) return 0;
+    // Prefer first incomplete stage after last completed, else last completed
+    for (let i = 0; i < STEPS.length; i++) {
+      if (!completed.has(i)) return i;
+    }
     return Math.max(...Array.from(completed));
   }, [completed]);
 
   const active = selected ?? defaultSelected;
+
+  const canCreateFollowUp =
+    !!latestLead &&
+    latestLead.status === "Handed Off" &&
+    !latestLead.followUpCreated;
+
+  const handleCreateFollowUp = () => {
+    if (!latestLead || !canCreateFollowUp) return;
+    createFollowUp(latestLead.id);
+    setConfirmMsg("Follow-up created — sales can now contact this lead.");
+    setSelected(5);
+  };
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
@@ -105,7 +117,10 @@ export default function AutomationPage() {
             {" · "}
             <button
               type="button"
-              onClick={() => clearSessionLeads()}
+              onClick={() => {
+                clearSessionLeads();
+                setConfirmMsg(null);
+              }}
               className="underline hover:text-emerald-300"
             >
               Clear session
@@ -140,6 +155,13 @@ export default function AutomationPage() {
           </span>
         </div>
       </div>
+
+      {confirmMsg && (
+        <div className="mb-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300 text-center animate-fade-in">
+          {confirmMsg}
+          <p className="mt-1 text-[11px] text-slate-500">DEMO MODE — no email, SMS, or WhatsApp was sent</p>
+        </div>
+      )}
 
       <div className="relative">
         <div className="absolute left-5 sm:left-6 top-4 bottom-4 w-0.5 bg-gradient-to-b from-blue-500 via-cyan-500 to-emerald-500 opacity-40" />
@@ -208,6 +230,67 @@ export default function AutomationPage() {
             ? "This stage is completed based on the session lead."
             : "This stage is not completed yet. Next only changes selection — it does not mark stages complete."}
         </p>
+
+        {active === 5 && latestLead && (
+          <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900/80 p-4 text-sm space-y-3">
+            <p className="text-xs text-amber-400/90 font-medium">DEMO MODE — simulated sales action</p>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
+              <div>
+                <dt className="text-slate-500 text-xs">Lead ID</dt>
+                <dd>{latestLead.id}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Name</dt>
+                <dd>{latestLead.name}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Buy / Rent</dt>
+                <dd>{latestLead.buyOrRent}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Property</dt>
+                <dd>{latestLead.propertyType}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Budget</dt>
+                <dd>{latestLead.budget}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Location</dt>
+                <dd>{latestLead.preferredLocation}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Timeline</dt>
+                <dd>{latestLead.timeline}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500 text-xs">Recommended action</dt>
+                <dd>Contact lead</dd>
+              </div>
+            </dl>
+            {canCreateFollowUp ? (
+              <button
+                type="button"
+                onClick={handleCreateFollowUp}
+                className="w-full sm:w-auto rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 transition"
+              >
+                Create Follow-up
+              </button>
+            ) : latestLead.followUpCreated ? (
+              <p className="text-emerald-400 text-sm">
+                Follow-up already created
+                {latestLead.followUpCreatedAt
+                  ? ` · ${new Date(latestLead.followUpCreatedAt).toLocaleString()}`
+                  : ""}
+              </p>
+            ) : (
+              <p className="text-slate-500 text-xs">
+                Complete Human Handoff first to unlock Create Follow-up.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 flex flex-wrap gap-2">
           {active > 0 && (
             <button
