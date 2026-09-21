@@ -29,6 +29,11 @@ export interface SessionLead {
   handedOffAt?: string;
   name: string;
   fingerprint: string;
+  /** DEMO — simulated sales follow-up */
+  followUpCreated?: boolean;
+  followUpCreatedAt?: string;
+  followUpStatus?: string;
+  followUpRecommendedAction?: string;
 }
 
 const STORAGE_KEY = "webcraftpro_session_leads_v2";
@@ -114,6 +119,7 @@ interface LeadStoreValue {
   latestLead: SessionLead | null;
   addQualifiedLead: (c: Collected) => SessionLead;
   handoffLead: (id: string) => void;
+  createFollowUp: (id: string) => SessionLead | null;
   clearSessionLeads: () => void;
 }
 
@@ -160,6 +166,10 @@ export function LeadProvider({ children }: { children: ReactNode }) {
           status: "Qualified",
           priority: computePriority(c),
           handedOffAt: undefined,
+          followUpCreated: false,
+          followUpCreatedAt: undefined,
+          followUpStatus: undefined,
+          followUpRecommendedAction: undefined,
           name: `AI Lead \u00b7 ${c.location || c.propertyType || "New"}`,
           fingerprint: fp,
         };
@@ -205,6 +215,26 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const createFollowUp = useCallback((id: string): SessionLead | null => {
+    const now = new Date().toISOString();
+    let updated: SessionLead | null = null;
+    setSessionLeads((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        updated = {
+          ...l,
+          followUpCreated: true,
+          followUpCreatedAt: now,
+          followUpStatus: "Follow-up Created",
+          followUpRecommendedAction: "Contact lead",
+          updatedAt: now,
+        };
+        return updated;
+      })
+    );
+    return updated;
+  }, []);
+
   const clearSessionLeads = useCallback(() => {
     setSessionLeads([]);
     saveLeads([]);
@@ -224,9 +254,10 @@ export function LeadProvider({ children }: { children: ReactNode }) {
       latestLead,
       addQualifiedLead,
       handoffLead,
+      createFollowUp,
       clearSessionLeads,
     }),
-    [sessionLeads, latestLead, addQualifiedLead, handoffLead, clearSessionLeads]
+    [sessionLeads, latestLead, addQualifiedLead, handoffLead, createFollowUp, clearSessionLeads]
   );
 
   return <LeadStoreContext.Provider value={value}>{children}</LeadStoreContext.Provider>;
