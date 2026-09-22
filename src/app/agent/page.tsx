@@ -408,7 +408,7 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:py-10 flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-9rem)]">
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:py-10 flex flex-col pb-6 sm:pb-8">
       <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
@@ -478,7 +478,7 @@ export default function AgentPage() {
         <span className="text-[11px] text-slate-500 self-center ml-1">{progress}/5</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4 space-y-3">
+      <div className="min-h-[40vh] max-h-[50vh] sm:max-h-[55vh] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/40 p-3 sm:p-4 space-y-3">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -540,7 +540,7 @@ export default function AgentPage() {
       </form>
 
       {(phase === "qualified" || phase === "handoff") && (
-        <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm animate-fade-in">
+        <div className="mt-3 mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm animate-fade-in">
           <p className="font-semibold text-emerald-400 mb-1 text-base">
             {phase === "handoff" ? "Lead handed off to sales" : "Lead Qualified"}
           </p>
