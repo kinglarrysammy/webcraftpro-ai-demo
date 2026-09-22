@@ -12,12 +12,36 @@ import {
 import type { Collected } from "@/lib/qualify";
 
 export type LeadPriority = "High" | "Medium" | "Low";
+
+/** Legacy CRM status (kept for compatibility) */
 export type SessionLeadStatus =
   | "Qualified"
   | "Handed Off"
   | "Contacted"
   | "Follow-up Scheduled"
   | "Closed";
+
+/** Agency sales pipeline stage */
+export type PipelineStage =
+  | "New"
+  | "AI Qualified"
+  | "Assigned"
+  | "Contacted"
+  | "Follow-up"
+  | "Negotiation"
+  | "Closed"
+  | "Lost";
+
+export const PIPELINE_STAGES: PipelineStage[] = [
+  "New",
+  "AI Qualified",
+  "Assigned",
+  "Contacted",
+  "Follow-up",
+  "Negotiation",
+  "Closed",
+  "Lost",
+];
 
 export type ChatRole = "ai" | "user";
 
@@ -26,6 +50,27 @@ export interface LeadMessage {
   role: ChatRole;
   text: string;
 }
+
+export interface LeadActivity {
+  id: string;
+  type: string;
+  timestamp: string;
+  actor?: string;
+  description?: string;
+}
+
+export interface DemoSalesperson {
+  id: string;
+  name: string;
+  role: string;
+}
+
+/** DEMO USERS only — not real people */
+export const DEMO_SALESPEOPLE: DemoSalesperson[] = [
+  { id: "sarah", name: "Sarah", role: "Sales Agent" },
+  { id: "youssef", name: "Youssef", role: "Sales Agent" },
+  { id: "amine", name: "Amine", role: "Senior Agent" },
+];
 
 export interface SessionLead {
   id: string;
@@ -37,6 +82,7 @@ export interface SessionLead {
   preferredLocation: string;
   timeline: string;
   status: SessionLeadStatus;
+  pipelineStage: PipelineStage;
   source: "AI Agent";
   priority: LeadPriority;
   handedOffAt?: string;
@@ -46,13 +92,17 @@ export interface SessionLead {
   followUpCreatedAt?: string;
   followUpStatus?: string;
   followUpRecommendedAction?: string;
-  /** Agent conversation for agency review */
   conversation?: LeadMessage[];
   contactedAt?: string;
   contactNote?: string;
   scheduledFollowUpAt?: string;
   closedAt?: string;
+  lostAt?: string;
   recommendedAction?: string;
+  assignedTo?: string;
+  assignedToName?: string;
+  assignedAt?: string;
+  activities?: LeadActivity[];
 }
 
 const STORAGE_KEY = "webcraftpro_session_leads_v2";
@@ -103,13 +153,47 @@ export function leadFingerprint(c: {
   );
 }
 
+function activity(
+  type: string,
+  actor?: string,
+  description?: string
+): LeadActivity {
+  return {
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    timestamp: new Date().toISOString(),
+    actor,
+    description,
+  };
+}
+
+function migrateLead(raw: SessionLead): SessionLead {
+  const activities = Array.isArray(raw.activities) ? raw.activities : [];
+  let pipelineStage = raw.pipelineStage;
+  if (!pipelineStage) {
+    if (raw.status === "Closed") pipelineStage = "Closed";
+    else if (raw.status === "Contacted") pipelineStage = "Contacted";
+    else if (raw.status === "Follow-up Scheduled") pipelineStage = "Follow-up";
+    else if (raw.status === "Handed Off")
+      pipelineStage = raw.assignedTo ? "Assigned" : "AI Qualified";
+    else pipelineStage = "AI Qualified";
+  }
+  return {
+    ...raw,
+    pipelineStage,
+    activities,
+    recommendedAction: raw.recommendedAction || "Review qualification",
+  };
+}
+
 function loadLeads(): SessionLead[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((l: SessionLead) => migrateLead(l));
   } catch {
     return [];
   }
@@ -137,7 +221,9 @@ export type AgencyAction =
   | "mark_contacted"
   | "schedule_followup"
   | "mark_qualified"
-  | "mark_closed";
+  | "mark_closed"
+  | "mark_lost"
+  | "negotiate";
 
 interface LeadStoreValue {
   sessionLeads: SessionLead[];
@@ -147,6 +233,7 @@ interface LeadStoreValue {
   createFollowUp: (id: string) => SessionLead | null;
   syncLeadConversation: (id: string, conversation: LeadMessage[]) => void;
   applyAgencyAction: (id: string, action: AgencyAction) => void;
+  assignLead: (id: string, salespersonId: string) => void;
   clearSessionLeads: () => void;
 }
 
@@ -183,6 +270,10 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         const existingIdx = prev.findIndex((l) => l.fingerprint === fp);
         if (existingIdx >= 0) {
           const prevLead = prev[existingIdx];
+          const acts = [
+            ...(prevLead.activities || []),
+            activity("AI Qualification Completed", "AI Agent", "Lead re-qualified (demo)"),
+          ];
           result = {
             ...prevLead,
             updatedAt: now,
@@ -192,6 +283,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
             preferredLocation: c.location || prevLead.preferredLocation,
             timeline: c.timeline || prevLead.timeline,
             status: "Qualified",
+            pipelineStage: prevLead.assignedTo ? "Assigned" : "AI Qualified",
             priority: computePriority(c),
             handedOffAt: undefined,
             followUpCreated: false,
@@ -201,10 +293,14 @@ export function LeadProvider({ children }: { children: ReactNode }) {
             contactedAt: undefined,
             scheduledFollowUpAt: undefined,
             closedAt: undefined,
-            recommendedAction: "Review qualification",
+            lostAt: undefined,
+            recommendedAction: prevLead.assignedTo
+              ? "Contact lead"
+              : "Assign to salesperson",
             conversation: conversation?.length ? conversation : prevLead.conversation,
             name: `AI Lead · ${c.location || c.propertyType || "New"}`,
             fingerprint: fp,
+            activities: acts,
           };
           const next = [...prev];
           next.splice(existingIdx, 1);
@@ -222,12 +318,17 @@ export function LeadProvider({ children }: { children: ReactNode }) {
           preferredLocation: c.location || "—",
           timeline: c.timeline || "—",
           status: "Qualified",
+          pipelineStage: "AI Qualified",
           source: "AI Agent",
           priority: computePriority(c),
           name: `AI Lead · ${c.location || c.propertyType || "New"}`,
           fingerprint: fp,
           conversation: conversation || [],
-          recommendedAction: "Review qualification",
+          recommendedAction: "Assign to salesperson",
+          activities: [
+            activity("Lead Created", "AI Agent", "Inquiry captured"),
+            activity("AI Qualification Completed", "AI Agent", "All 5 fields validated"),
+          ],
         };
         return [result, ...prev];
       });
@@ -239,17 +340,21 @@ export function LeadProvider({ children }: { children: ReactNode }) {
 
   const handoffLead = useCallback((id: string) => {
     setSessionLeads((prev) =>
-      prev.map((l) =>
-        l.id === id
-          ? {
-              ...l,
-              status: "Handed Off" as const,
-              handedOffAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              recommendedAction: "Contact lead",
-            }
-          : l
-      )
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        const now = new Date().toISOString();
+        return {
+          ...l,
+          status: "Handed Off" as const,
+          handedOffAt: now,
+          updatedAt: now,
+          recommendedAction: l.assignedTo ? "Contact lead" : "Assign to salesperson",
+          activities: [
+            ...(l.activities || []),
+            activity("Human Handoff", "AI Agent → Sales", "Qualification handed to sales"),
+          ],
+        };
+      })
     );
   }, []);
 
@@ -266,7 +371,17 @@ export function LeadProvider({ children }: { children: ReactNode }) {
           followUpStatus: "Follow-up Created",
           followUpRecommendedAction: "Contact lead",
           recommendedAction: "Contact lead",
+          pipelineStage:
+            l.pipelineStage === "Closed" || l.pipelineStage === "Lost"
+              ? l.pipelineStage
+              : "Follow-up",
+          status: "Follow-up Scheduled",
+          scheduledFollowUpAt: now,
           updatedAt: now,
+          activities: [
+            ...(l.activities || []),
+            activity("Follow-up Created", l.assignedToName || "Sales", "Sales follow-up recorded"),
+          ],
         };
         return updated;
       })
@@ -277,10 +392,40 @@ export function LeadProvider({ children }: { children: ReactNode }) {
   const syncLeadConversation = useCallback((id: string, conversation: LeadMessage[]) => {
     setSessionLeads((prev) =>
       prev.map((l) =>
-        l.id === id
-          ? { ...l, conversation, updatedAt: new Date().toISOString() }
-          : l
+        l.id === id ? { ...l, conversation, updatedAt: new Date().toISOString() } : l
       )
+    );
+  }, []);
+
+  const assignLead = useCallback((id: string, salespersonId: string) => {
+    const person = DEMO_SALESPEOPLE.find((p) => p.id === salespersonId);
+    if (!person) return;
+    const now = new Date().toISOString();
+    setSessionLeads((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        const reassign = !!l.assignedTo;
+        return {
+          ...l,
+          assignedTo: person.id,
+          assignedToName: `${person.name} — ${person.role}`,
+          assignedAt: now,
+          pipelineStage:
+            l.pipelineStage === "Closed" || l.pipelineStage === "Lost"
+              ? l.pipelineStage
+              : "Assigned",
+          updatedAt: now,
+          recommendedAction: "Contact lead",
+          activities: [
+            ...(l.activities || []),
+            activity(
+              reassign ? "Lead Reassigned" : "Lead Assigned",
+              `${person.name} — ${person.role}`,
+              reassign ? `Reassigned to ${person.name}` : `Assigned to ${person.name}`
+            ),
+          ],
+        };
+      })
     );
   }, []);
 
@@ -289,6 +434,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     setSessionLeads((prev) =>
       prev.map((l) => {
         if (l.id !== id) return l;
+        const actor = l.assignedToName || "Sales";
         switch (action) {
           case "contact":
             return {
@@ -296,19 +442,29 @@ export function LeadProvider({ children }: { children: ReactNode }) {
               contactNote: "Contact initiated (demo — no message sent)",
               recommendedAction: "Mark contacted after outreach",
               updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Contact Attempted", actor, "Demo contact noted — no real message sent"),
+              ],
             };
           case "mark_contacted":
             return {
               ...l,
               status: "Contacted",
+              pipelineStage: "Contacted",
               contactedAt: now,
               recommendedAction: "Schedule follow-up if needed",
               updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Lead Contacted", actor, "Marked as contacted"),
+              ],
             };
           case "schedule_followup":
             return {
               ...l,
               status: "Follow-up Scheduled",
+              pipelineStage: "Follow-up",
               scheduledFollowUpAt: now,
               followUpCreated: true,
               followUpCreatedAt: l.followUpCreatedAt || now,
@@ -316,22 +472,60 @@ export function LeadProvider({ children }: { children: ReactNode }) {
               followUpRecommendedAction: "Contact lead",
               recommendedAction: "Complete scheduled follow-up",
               updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Follow-up Scheduled", actor, "Follow-up scheduled (demo)"),
+              ],
+            };
+          case "negotiate":
+            return {
+              ...l,
+              pipelineStage: "Negotiation",
+              recommendedAction: "Continue negotiation",
+              updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Moved to Negotiation", actor, "Pipeline stage updated"),
+              ],
             };
           case "mark_qualified":
             return {
               ...l,
               status: "Qualified",
-              recommendedAction: "Human handoff or contact",
+              pipelineStage: l.assignedTo ? "Assigned" : "AI Qualified",
+              recommendedAction: l.assignedTo ? "Contact lead" : "Assign to salesperson",
               closedAt: undefined,
+              lostAt: undefined,
               updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Status Changed", actor, "Returned to qualified/active"),
+              ],
             };
           case "mark_closed":
             return {
               ...l,
               status: "Closed",
+              pipelineStage: "Closed",
               closedAt: now,
               recommendedAction: "—",
               updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Lead Closed", actor, "Marked closed (demo)"),
+              ],
+            };
+          case "mark_lost":
+            return {
+              ...l,
+              pipelineStage: "Lost",
+              lostAt: now,
+              recommendedAction: "—",
+              updatedAt: now,
+              activities: [
+                ...(l.activities || []),
+                activity("Lead Lost", actor, "Marked lost (demo)"),
+              ],
             };
           default:
             return l;
@@ -363,6 +557,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
       createFollowUp,
       syncLeadConversation,
       applyAgencyAction,
+      assignLead,
       clearSessionLeads,
     }),
     [
@@ -373,6 +568,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
       createFollowUp,
       syncLeadConversation,
       applyAgencyAction,
+      assignLead,
       clearSessionLeads,
     ]
   );
