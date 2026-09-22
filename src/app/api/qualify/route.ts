@@ -29,7 +29,6 @@ interface QualifyResult {
   isQualified: boolean;
   response: string;
   fields: Partial<Collected>;
-  /** Non-secret diagnostics when AI was attempted but fallback was used */
   aiDiagnostics?: {
     configured: boolean;
     model: string;
@@ -38,6 +37,7 @@ interface QualifyResult {
     errorCode?: string;
     errorType?: string;
     note?: string;
+    usedModel?: string;
   };
 }
 
@@ -52,7 +52,6 @@ function safeHost(baseUrl: string): string {
 function normalizeBaseUrl(raw: string): string {
   let u = (raw || "").trim().replace(/\/$/, "");
   if (!u) return "https://api.openai.com/v1";
-  // Common misconfig: https://api.openai.com without /v1
   if (/^https?:\/\/api\.openai\.com$/i.test(u)) u = `${u}/v1`;
   if (/^https?:\/\/api\.x\.ai$/i.test(u)) u = `${u}/v1`;
   return u;
@@ -198,23 +197,41 @@ type AiCallResult =
       errorCode?: string;
       errorType?: string;
       note?: string;
+      usedModel?: string;
     };
 
 async function callChatCompletions(
   cfg: { apiKey: string; baseUrl: string; model: string },
   messages: { role: string; content: string }[]
-): Promise<{ ok: true; content: string } | { ok: false; httpStatus: number; errorCode?: string; errorType?: string; note?: string }> {
+): Promise<{
+  ok: true;
+  content: string;
+  usedModel: string;
+} | {
+  ok: false;
+  httpStatus: number;
+  errorCode?: string;
+  errorType?: string;
+  note?: string;
+  usedModel: string;
+}> {
+  // Prefer a body that works across chat models; omit temperature if it causes issues on retry
+  const body: Record<string, unknown> = {
+    model: cfg.model,
+    messages,
+  };
+  // temperature is widely supported on gpt-4o* ; skip for models that may reject it
+  if (!/o1|o3|reasoning/i.test(cfg.model)) {
+    body.temperature = 0.2;
+  }
+
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${cfg.apiKey}`,
     },
-    body: JSON.stringify({
-      model: cfg.model,
-      temperature: 0.2,
-      messages,
-    }),
+    body: JSON.stringify(body),
   });
 
   const text = await res.text().catch(() => "");
@@ -225,7 +242,6 @@ async function callChatCompletions(
       const j = JSON.parse(text);
       errorCode = j?.error?.code || j?.error?.error?.code;
       errorType = j?.error?.type || j?.error?.error?.type;
-      // Never log message bodies that might echo secrets; code/type only
       console.error(
         "[qualify] AI HTTP error",
         res.status,
@@ -251,14 +267,17 @@ async function callChatCompletions(
       httpStatus: res.status,
       errorCode,
       errorType,
+      usedModel: cfg.model,
       note:
-        res.status === 404 || errorCode === "model_not_found"
+        errorCode === "model_not_found" || res.status === 404
           ? "Model not found for this provider. Check AI_MODEL."
-          : res.status === 401
-            ? "Provider rejected the API key (401)."
-            : res.status === 429
-              ? "Rate limited by provider."
-              : "Provider request failed.",
+          : errorCode === "unsupported_value"
+            ? "Provider rejected a request parameter (often an invalid model id)."
+            : res.status === 401
+              ? "Provider rejected the API key (401)."
+              : res.status === 429
+                ? "Rate limited by provider."
+                : "Provider request failed.",
     };
   }
 
@@ -266,11 +285,21 @@ async function callChatCompletions(
     const data = JSON.parse(text);
     const content = data?.choices?.[0]?.message?.content;
     if (!content || typeof content !== "string") {
-      return { ok: false, httpStatus: 200, note: "Empty model content" };
+      return {
+        ok: false,
+        httpStatus: 200,
+        usedModel: cfg.model,
+        note: "Empty model content",
+      };
     }
-    return { ok: true, content };
+    return { ok: true, content, usedModel: cfg.model };
   } catch {
-    return { ok: false, httpStatus: 200, note: "Invalid provider JSON" };
+    return {
+      ok: false,
+      httpStatus: 200,
+      usedModel: cfg.model,
+      note: "Invalid provider JSON",
+    };
   }
 }
 
@@ -292,6 +321,24 @@ function parseModelJson(raw: string): Record<string, unknown> | null {
   }
 }
 
+function shouldRetryWithDefaultModel(call: {
+  ok: boolean;
+  httpStatus?: number;
+  errorCode?: string;
+  usedModel?: string;
+}): boolean {
+  if (call.ok) return false;
+  const code = call.errorCode || "";
+  const status = call.httpStatus || 0;
+  return (
+    code === "model_not_found" ||
+    code === "unsupported_value" ||
+    code === "invalid_model" ||
+    status === 404 ||
+    status === 400
+  );
+}
+
 async function aiQualify(
   latestMessage: string,
   collected: Collected,
@@ -311,29 +358,11 @@ async function aiQualify(
 
   let call = await callChatCompletions(cfg, messages);
 
-  // If model is invalid, retry once with a known OpenAI-compatible default (no secret changes)
-  if (
-    !call.ok &&
-    (call.errorCode === "model_not_found" ||
-      call.httpStatus === 404 ||
-      (call.note || "").includes("Model not found"))
-  ) {
-    const fallbackModel =
-      cfg.baseUrl.includes("x.ai") ? "grok-2-latest" : "gpt-4o-mini";
+  if (!call.ok && shouldRetryWithDefaultModel(call)) {
+    const fallbackModel = cfg.baseUrl.includes("x.ai") ? "grok-2-latest" : "gpt-4o-mini";
     if (fallbackModel !== cfg.model) {
       console.error("[qualify] retrying with fallback model", fallbackModel);
       call = await callChatCompletions({ ...cfg, model: fallbackModel }, messages);
-      if (call.ok) {
-        // continue with success using fallback model response
-      } else {
-        return {
-          ok: false,
-          httpStatus: call.httpStatus,
-          errorCode: call.errorCode,
-          errorType: call.errorType,
-          note: `Configured model failed; retry with ${fallbackModel} also failed. ${call.note || ""}`.trim(),
-        };
-      }
     }
   }
 
@@ -344,12 +373,13 @@ async function aiQualify(
       errorCode: call.errorCode,
       errorType: call.errorType,
       note: call.note,
+      usedModel: call.usedModel,
     };
   }
 
   const parsed = parseModelJson(call.content);
   if (!parsed) {
-    return { ok: false, note: "Model returned non-JSON content" };
+    return { ok: false, note: "Model returned non-JSON content", usedModel: call.usedModel };
   }
 
   const aiFields: Partial<Collected> = {};
@@ -398,6 +428,16 @@ async function aiQualify(
       isQualified,
       response,
       fields: merged,
+      aiDiagnostics: {
+        configured: true,
+        model: cfg.model,
+        baseHost: safeHost(cfg.baseUrl),
+        usedModel: call.usedModel,
+        note:
+          call.usedModel !== cfg.model
+            ? `Configured model rejected; used ${call.usedModel}`
+            : undefined,
+      },
     },
   };
 }
@@ -442,6 +482,7 @@ export async function POST(req: Request) {
           errorCode: ai.errorCode,
           errorType: ai.errorType,
           note: ai.note,
+          usedModel: ai.usedModel,
         })
       );
     } catch (e) {
