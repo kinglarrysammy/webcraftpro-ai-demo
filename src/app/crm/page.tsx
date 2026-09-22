@@ -101,9 +101,9 @@ function CRMPageContent() {
     if (!selected || selected.kind !== "session") return;
     applyAgencyAction(selected.lead.id, action);
     const labels: Record<AgencyAction, string> = {
-      contact: "Contact noted (demo — no WhatsApp/email sent)",
-      mark_contacted: "Pipeline → Contacted",
-      schedule_followup: "Pipeline → Follow-up",
+      contact: "Contact recorded — state updated",
+      mark_contacted: "Contact recorded — state updated",
+      schedule_followup: "Follow-up recorded — state updated",
       mark_qualified: "Returned to active qualified state",
       mark_closed: "Pipeline → Closed",
       mark_lost: "Pipeline → Lost",
@@ -445,19 +445,10 @@ function SalesActionBar({
   const isTerminal = st === "Closed" || st === "Lost";
   const isAssigned = !!lead.assignedTo;
   const isHandedOff = !!lead.handedOffAt || lead.status === "Handed Off";
-  const isContacted =
-    !!lead.contactedAt ||
-    st === "Contacted" ||
-    st === "Follow-up" ||
-    st === "Negotiation" ||
-    st === "Closed";
-  const isFollowUp =
-    !!lead.followUpCreated ||
-    !!lead.scheduledFollowUpAt ||
-    st === "Follow-up" ||
-    st === "Negotiation" ||
-    st === "Closed";
-  const isNegotiation = st === "Negotiation" || st === "Closed";
+  // Independent field-driven completion flags
+  const isContacted = !!lead.contactedAt;
+  const isFollowUp = !!lead.followUpCreated || !!lead.scheduledFollowUpAt;
+  const isNegotiation = st === "Negotiation";
   const isClosed = st === "Closed";
   const isLost = st === "Lost";
   const done =
@@ -534,14 +525,9 @@ function SalesActionBar({
         {isContacted ? (
           <span className={done}>✓ Contacted</span>
         ) : !isTerminal ? (
-          <>
-            <button type="button" onClick={() => runAction("contact")} className={active}>
-              Contact Lead
-            </button>
-            <button type="button" onClick={() => runAction("mark_contacted")} className={active}>
-              Mark Contacted
-            </button>
-          </>
+          <button type="button" onClick={() => runAction("contact")} className={active}>
+            Contact Lead
+          </button>
         ) : null}
 
         {isFollowUp ? (
@@ -559,7 +545,7 @@ function SalesActionBar({
           </button>
         ) : null}
 
-        {isNegotiation ? (
+        {isNegotiation || isClosed ? (
           <span className={done}>✓ Negotiation</span>
         ) : !isTerminal ? (
           <button type="button" onClick={() => runAction("negotiate")} className={active}>
