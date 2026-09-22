@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { QUALIFIED_LEADS, type Lead } from "@/lib/demo-data";
 import {
   useLeadStore,
-  type SessionLead,
   type AgencyAction,
   type PipelineStage,
   PIPELINE_STAGES,
@@ -31,7 +30,7 @@ const priorityClass: Record<string, string> = {
 };
 
 type CrmRow =
-  | { kind: "session"; lead: SessionLead }
+  | { kind: "session"; lead: import("@/lib/lead-store").SessionLead }
   | { kind: "demo"; lead: Lead };
 
 function fmt(ts?: string) {
@@ -310,189 +309,15 @@ function CRMPageContent() {
                 <p className="text-[11px] text-slate-500 mb-3">
                   Recommended: {selected.lead.recommendedAction || "—"}
                 </p>
-
-                {(() => {
-                  const lead = selected.lead;
-                  const st = lead.pipelineStage || "AI Qualified";
-                  const isTerminal = st === "Closed" || st === "Lost";
-                  const isAssigned = !!lead.assignedTo;
-                  const isHandedOff =
-                    !!lead.handedOffAt || lead.status === "Handed Off";
-                  const isContacted =
-                    !!lead.contactedAt ||
-                    st === "Contacted" ||
-                    st === "Follow-up" ||
-                    st === "Negotiation" ||
-                    st === "Closed";
-                  const isFollowUp =
-                    !!lead.followUpCreated ||
-                    !!lead.scheduledFollowUpAt ||
-                    st === "Follow-up" ||
-                    st === "Negotiation" ||
-                    st === "Closed";
-                  const isNegotiation = st === "Negotiation" || st === "Closed";
-                  const isClosed = st === "Closed";
-                  const isLost = st === "Lost";
-                  const done =
-                    "rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center";
-                  const active =
-                    "rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]";
-                  const primary =
-                    "rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 min-h-[36px]";
-
-                  return (
-                    <>
-                      {showAssign && !isTerminal && (
-                        <div className="mb-3 rounded-lg border border-slate-700 bg-slate-950/60 p-3 space-y-2">
-                          <p className="text-xs text-slate-400">Assign to (DEMO USERS)</p>
-                          {DEMO_SALESPEOPLE.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() => {
-                                assignLead(lead.id, p.id);
-                                setActionNote(`Assigned to ${p.name} — ${p.role}`);
-                                setShowAssign(false);
-                              }}
-                              className="w-full text-left rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 min-h-[40px]"
-                            >
-                              {p.name}{" "}
-                              <span className="text-slate-500 text-xs">— {p.role}</span>
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => setShowAssign(false)}
-                            className="text-xs text-slate-500 hover:text-slate-300"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap gap-2">
-                        {isAssigned ? (
-                          <>
-                            <span className={done}>
-                              ✓ Assigned
-                              {lead.assignedToName
-                                ? ` · ${lead.assignedToName.split(" — ")[0]}`
-                                : ""}
-                            </span>
-                            {!isTerminal && (
-                              <button
-                                type="button"
-                                onClick={() => setShowAssign(true)}
-                                className={active}
-                              >
-                                Reassign
-                              </button>
-                            )}
-                          </>
-                        ) : !isTerminal ? (
-                          <button
-                            type="button"
-                            onClick={() => setShowAssign(true)}
-                            className={primary}
-                          >
-                            Assign Lead
-                          </button>
-                        ) : null}
-
-                        {isHandedOff ? (
-                          <span className={done}>✓ Handed Off</span>
-                        ) : !isTerminal &&
-                          (lead.status === "Qualified" ||
-                            st === "AI Qualified" ||
-                            st === "Assigned") ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handoffLead(lead.id);
-                              setActionNote("Human handoff recorded");
-                            }}
-                            className="rounded-lg border border-amber-600/50 px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/10 min-h-[36px]"
-                          >
-                            Human Handoff
-                          </button>
-                        ) : null}
-
-                        {isContacted ? (
-                          <span className={done}>✓ Contacted</span>
-                        ) : !isTerminal ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => runAction("contact")}
-                              className={active}
-                            >
-                              Contact Lead
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => runAction("mark_contacted")}
-                              className={active}
-                            >
-                              Mark Contacted
-                            </button>
-                          </>
-                        ) : null}
-
-                        {isFollowUp ? (
-                          <span className={done}>✓ Follow-up Created</span>
-                        ) : !isTerminal ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              runAction("schedule_followup");
-                              setActionNote("Follow-up recorded");
-                            }}
-                            className={active}
-                          >
-                            Create Follow-up
-                          </button>
-                        ) : null}
-
-                        {isNegotiation ? (
-                          <span className={done}>✓ Negotiation</span>
-                        ) : !isTerminal ? (
-                          <button
-                            type="button"
-                            onClick={() => runAction("negotiate")}
-                            className={active}
-                          >
-                            Move to Negotiation
-                          </button>
-                        ) : null}
-
-                        {isClosed ? (
-                          <span className={done}>✓ Closed</span>
-                        ) : isLost ? (
-                          <span className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 min-h-[36px] inline-flex items-center">
-                            ✓ Lost
-                          </span>
-                        ) : (
-                          <>
-                            <button
-                              type="button"itur
-                              onClick={() => runAction("mark_closed")}
-                              className={active}
-                            >
-                              Mark Closed
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => runAction("mark_lost")}
-                              className="rounded-lg border border-rose-600/40 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 min-h-[36px]"
-                            >
-                              Mark Lost
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
+                <SalesActionBar
+                  lead={selected.lead}
+                  showAssign={showAssign}
+                  setShowAssign={setShowAssign}
+                  assignLead={assignLead}
+                  handoffLead={handoffLead}
+                  runAction={runAction}
+                  setActionNote={setActionNote}
+                />
                 <p className="mt-3 text-[11px] text-slate-500">
                   DEMO MODE — no real WhatsApp, email, or external CRM actions are being performed
                 </p>
@@ -596,6 +421,174 @@ function CRMPageContent() {
         </div>
       </div>
     </div>
+  );
+}
+
+function SalesActionBar({
+  lead,
+  showAssign,
+  setShowAssign,
+  assignLead,
+  handoffLead,
+  runAction,
+  setActionNote,
+}: {
+  lead: import("@/lib/lead-store").SessionLead;
+  showAssign: boolean;
+  setShowAssign: (v: boolean) => void;
+  assignLead: (id: string, salespersonId: string) => void;
+  handoffLead: (id: string) => void;
+  runAction: (action: AgencyAction) => void;
+  setActionNote: (v: string | null) => void;
+}) {
+  const st = lead.pipelineStage || "AI Qualified";
+  const isTerminal = st === "Closed" || st === "Lost";
+  const isAssigned = !!lead.assignedTo;
+  const isHandedOff = !!lead.handedOffAt || lead.status === "Handed Off";
+  const isContacted =
+    !!lead.contactedAt ||
+    st === "Contacted" ||
+    st === "Follow-up" ||
+    st === "Negotiation" ||
+    st === "Closed";
+  const isFollowUp =
+    !!lead.followUpCreated ||
+    !!lead.scheduledFollowUpAt ||
+    st === "Follow-up" ||
+    st === "Negotiation" ||
+    st === "Closed";
+  const isNegotiation = st === "Negotiation" || st === "Closed";
+  const isClosed = st === "Closed";
+  const isLost = st === "Lost";
+  const done =
+    "rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center";
+  const active =
+    "rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]";
+  const primary =
+    "rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 min-h-[36px]";
+
+  return (
+    <>
+      {showAssign && !isTerminal && (
+        <div className="mb-3 rounded-lg border border-slate-700 bg-slate-950/60 p-3 space-y-2">
+          <p className="text-xs text-slate-400">Assign to (DEMO USERS)</p>
+          {DEMO_SALESPEOPLE.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                assignLead(lead.id, p.id);
+                setActionNote(`Assigned to ${p.name} — ${p.role}`);
+                setShowAssign(false);
+              }}
+              className="w-full text-left rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 min-h-[40px]"
+            >
+              {p.name} <span className="text-slate-500 text-xs">— {p.role}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowAssign(false)}
+            className="text-xs text-slate-500 hover:text-slate-300"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {isAssigned ? (
+          <>
+            <span className={done}>
+              ✓ Assigned
+              {lead.assignedToName ? ` · ${lead.assignedToName.split(" — ")[0]}` : ""}
+            </span>
+            {!isTerminal && (
+              <button type="button" onClick={() => setShowAssign(true)} className={active}>
+                Reassign
+              </button>
+            )}
+          </>
+        ) : !isTerminal ? (
+          <button type="button" onClick={() => setShowAssign(true)} className={primary}>
+            Assign Lead
+          </button>
+        ) : null}
+
+        {isHandedOff ? (
+          <span className={done}>✓ Handed Off</span>
+        ) : !isTerminal &&
+          (lead.status === "Qualified" || st === "AI Qualified" || st === "Assigned") ? (
+          <button
+            type="button"
+            onClick={() => {
+              handoffLead(lead.id);
+              setActionNote("Human handoff recorded");
+            }}
+            className="rounded-lg border border-amber-600/50 px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/10 min-h-[36px]"
+          >
+            Human Handoff
+          </button>
+        ) : null}
+
+        {isContacted ? (
+          <span className={done}>✓ Contacted</span>
+        ) : !isTerminal ? (
+          <>
+            <button type="button" onClick={() => runAction("contact")} className={active}>
+              Contact Lead
+            </button>
+            <button type="button" onClick={() => runAction("mark_contacted")} className={active}>
+              Mark Contacted
+            </button>
+          </>
+        ) : null}
+
+        {isFollowUp ? (
+          <span className={done}>✓ Follow-up Created</span>
+        ) : !isTerminal ? (
+          <button
+            type="button"
+            onClick={() => {
+              runAction("schedule_followup");
+              setActionNote("Follow-up recorded");
+            }}
+            className={active}
+          >
+            Create Follow-up
+          </button>
+        ) : null}
+
+        {isNegotiation ? (
+          <span className={done}>✓ Negotiation</span>
+        ) : !isTerminal ? (
+          <button type="button" onClick={() => runAction("negotiate")} className={active}>
+            Move to Negotiation
+          </button>
+        ) : null}
+
+        {isClosed ? (
+          <span className={done}>✓ Closed</span>
+        ) : isLost ? (
+          <span className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 min-h-[36px] inline-flex items-center">
+            ✓ Lost
+          </span>
+        ) : (
+          <>
+            <button type="button" onClick={() => runAction("mark_closed")} className={active}>
+              Mark Closed
+            </button>
+            <button
+              type="button"
+              onClick={() => runAction("mark_lost")}
+              className="rounded-lg border border-rose-600/40 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 min-h-[36px]"
+            >
+              Mark Lost
+            </button>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
