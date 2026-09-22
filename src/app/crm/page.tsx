@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { QUALIFIED_LEADS, type Lead } from "@/lib/demo-data";
 import {
   useLeadStore,
@@ -38,10 +39,12 @@ function fmt(ts?: string) {
   }
 }
 
-export default function CRMPage() {
+function CRMPageContent() {
   const { sessionLeads, clearSessionLeads, applyAgencyAction, handoffLead, createFollowUp } =
     useLeadStore();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const leadFromUrl = searchParams.get("lead");
+  const [selectedId, setSelectedId] = useState<string | null>(leadFromUrl);
   const [actionNote, setActionNote] = useState<string | null>(null);
 
   const rows: CrmRow[] = useMemo(() => {
@@ -51,10 +54,14 @@ export default function CRMPage() {
   }, [sessionLeads]);
 
   useEffect(() => {
+    if (leadFromUrl) {
+      setSelectedId(leadFromUrl);
+      return;
+    }
     if (sessionLeads.length > 0 && !selectedId) {
       setSelectedId(sessionLeads[0].id);
     }
-  }, [sessionLeads, selectedId]);
+  }, [sessionLeads, selectedId, leadFromUrl]);
 
   const selected = rows.find((r) => r.lead.id === selectedId);
   const sessionSelected =
@@ -74,8 +81,8 @@ export default function CRMPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
-      <div className="mb-8">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
+      <div className="mb-6 sm:mb-8">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">Agency CRM</h1>
         <p className="mt-1 text-slate-400 text-sm">
           Real-estate lead workspace ·{" "}
@@ -100,7 +107,7 @@ export default function CRMPage() {
               setSelectedId(null);
               setActionNote(null);
             }}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition"
+            className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 transition min-h-[36px]"
           >
             Clear Session Leads
           </button>
@@ -113,18 +120,19 @@ export default function CRMPage() {
       {actionNote && (
         <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-300">
           {actionNote}
-          <p className="text-[11px] text-slate-500 mt-0.5">No real messages or external CRM updates</p>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            DEMO MODE — no real WhatsApp, email, or external CRM actions
+          </p>
         </div>
       )}
 
-      <div className="grid lg:grid-cols-5 gap-6">
-        {/* LIST */}
+      <div className="grid lg:grid-cols-5 gap-4 sm:gap-6">
         <div className="lg:col-span-2 rounded-xl border border-slate-800 overflow-hidden">
           <div className="border-b border-slate-800 bg-slate-900/60 px-4 py-3 flex items-center justify-between">
             <h2 className="font-semibold text-white text-sm">Leads</h2>
             <span className="text-xs text-slate-500">{rows.length}</span>
           </div>
-          <div className="divide-y divide-slate-800 max-h-[70vh] overflow-y-auto">
+          <div className="divide-y divide-slate-800 max-h-[50vh] lg:max-h-[70vh] overflow-y-auto">
             {rows.map((row) => {
               const id = row.lead.id;
               const isSession = row.kind === "session";
@@ -138,16 +146,18 @@ export default function CRMPage() {
                     setSelectedId(id);
                     setActionNote(null);
                   }}
-                  className={`w-full text-left p-4 space-y-1.5 transition ${
-                    selectedId === id ? "bg-blue-500/10 border-l-2 border-l-blue-500" : "hover:bg-slate-900/50 border-l-2 border-l-transparent"
+                  className={`w-full text-left p-3 sm:p-4 space-y-1 transition ${
+                    selectedId === id
+                      ? "bg-blue-500/10 border-l-2 border-l-blue-500"
+                      : "hover:bg-slate-900/50 border-l-2 border-l-transparent"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-white text-sm">{row.lead.name}</span>
+                    <span className="font-medium text-white text-sm truncate">{row.lead.name}</span>
                     <span className={statusClass[row.lead.status] || "badge"}>{row.lead.status}</span>
                   </div>
                   <p className="text-[11px] text-slate-500">{id}</p>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-xs text-slate-300 break-words">
                     {isSession ? (
                       <>
                         {row.lead.buyOrRent} · {prop} · {row.lead.budget}
@@ -163,9 +173,6 @@ export default function CRMPage() {
                     <div className="flex flex-wrap gap-2 text-[11px]">
                       <span className={priorityClass[row.lead.priority]}>Priority {row.lead.priority}</span>
                       <span className="text-emerald-500/80">AI Agent</span>
-                      {row.lead.timeline && (
-                        <span className="text-slate-500">{row.lead.timeline}</span>
-                      )}
                     </div>
                   ) : (
                     <p className="text-[11px] text-amber-400/80">DEMO DATA</p>
@@ -176,16 +183,17 @@ export default function CRMPage() {
           </div>
         </div>
 
-        {/* DETAIL */}
         <div className="lg:col-span-3 space-y-4">
           {selected ? (
             selected.kind === "session" ? (
               <>
-                <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 animate-fade-in">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5 animate-fade-in">
                   <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-white">{selected.lead.name}</h3>
-                      <p className="text-xs text-slate-500 mt-0.5">{selected.lead.id} · Source: AI Agent</p>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-white break-words">{selected.lead.name}</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {selected.lead.id} · Source: AI Agent
+                      </p>
                     </div>
                     <span className={statusClass[selected.lead.status]}>{selected.lead.status}</span>
                   </div>
@@ -198,16 +206,13 @@ export default function CRMPage() {
                         ["Budget", selected.lead.budget],
                         ["Location", selected.lead.preferredLocation],
                         ["Timeline", selected.lead.timeline],
-                        [
-                          "Priority",
-                          selected.lead.priority,
-                        ],
+                        ["Priority", selected.lead.priority],
                       ] as const
                     ).map(([k, v]) => (
-                      <div key={k}>
+                      <div key={k} className="min-w-0">
                         <dt className="text-[10px] uppercase tracking-wide text-slate-500">{k}</dt>
                         <dd
-                          className={`mt-0.5 text-slate-200 ${
+                          className={`mt-0.5 text-slate-200 break-words ${
                             k === "Priority" ? priorityClass[selected.lead.priority] : ""
                           }`}
                         >
@@ -269,45 +274,31 @@ export default function CRMPage() {
                     )}
                   </div>
 
-                  {/* Agency actions */}
                   <div className="mt-5 border-t border-slate-800 pt-4">
                     <p className="text-xs font-medium text-slate-400 mb-2">Agency actions (demo)</p>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => runAction("contact")}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500"
-                      >
-                        Contact Lead
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runAction("mark_contacted")}
-                        className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                      >
-                        Mark Contacted
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runAction("schedule_followup")}
-                        className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                      >
-                        Schedule Follow-up
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runAction("mark_qualified")}
-                        className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                      >
-                        Mark Qualified
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runAction("mark_closed")}
-                        className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                      >
-                        Mark Closed
-                      </button>
+                      {(
+                        [
+                          ["contact", "Contact Lead", true],
+                          ["mark_contacted", "Mark Contacted", false],
+                          ["schedule_followup", "Schedule Follow-up", false],
+                          ["mark_qualified", "Mark Qualified", false],
+                          ["mark_closed", "Mark Closed", false],
+                        ] as const
+                      ).map(([action, label, primary]) => (
+                        <button
+                          key={action}
+                          type="button"
+                          onClick={() => runAction(action)}
+                          className={
+                            primary
+                              ? "rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 min-h-[36px]"
+                              : "rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
                       {selected.lead.status === "Qualified" && (
                         <button
                           type="button"
@@ -315,7 +306,7 @@ export default function CRMPage() {
                             handoffLead(selected.lead.id);
                             setActionNote("Human handoff recorded");
                           }}
-                          className="rounded-lg border border-amber-600/50 px-3 py-1.5 text-xs text-amber-300 hover:bg-amber-500/10"
+                          className="rounded-lg border border-amber-600/50 px-3 py-2 text-xs text-amber-300 hover:bg-amber-500/10 min-h-[36px]"
                         >
                           Human Handoff
                         </button>
@@ -329,23 +320,22 @@ export default function CRMPage() {
                               createFollowUp(selected.lead.id);
                               setActionNote("Sales follow-up created");
                             }}
-                            className="rounded-lg border border-emerald-600/50 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/10"
+                            className="rounded-lg border border-emerald-600/50 px-3 py-2 text-xs text-emerald-300 hover:bg-emerald-500/10 min-h-[36px]"
                           >
                             Create Follow-up
                           </button>
                         )}
                     </div>
                     <p className="mt-2 text-[11px] text-slate-500">
-                      DEMO MODE — these actions only update local demo state
+                      DEMO MODE — no real WhatsApp, email, or external CRM actions are being performed
                     </p>
                   </div>
                 </div>
 
-                {/* Conversation */}
                 <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 gap-2">
                     <h4 className="text-sm font-semibold text-white">AI conversation</h4>
-                    <span className="text-[10px] text-slate-500">WhatsApp-style · read-only</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">WhatsApp-style · read-only</span>
                   </div>
                   {selected.lead.conversation && selected.lead.conversation.length > 0 ? (
                     <div className="space-y-2 max-h-80 overflow-y-auto rounded-lg bg-slate-950/50 p-3">
@@ -357,7 +347,7 @@ export default function CRMPage() {
                           }`}
                         >
                           <div
-                            className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
+                            className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-3 py-2 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap break-words ${
                               msg.role === "user"
                                 ? "bg-blue-600 text-white rounded-br-md"
                                 : "bg-slate-800 text-slate-200 rounded-bl-md"
@@ -384,7 +374,7 @@ export default function CRMPage() {
               </>
             ) : (
               <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex items-start justify-between mb-3 gap-2">
                   <div>
                     <h3 className="text-lg font-semibold text-white">{selected.lead.name}</h3>
                     <p className="text-xs text-slate-500">{selected.lead.id}</p>
@@ -417,8 +407,8 @@ export default function CRMPage() {
               </div>
             )
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center text-slate-500 text-sm">
-              Select a lead to view the agency workspace
+            <div className="rounded-xl border border-dashed border-slate-700 p-8 sm:p-10 text-center text-slate-500 text-sm">
+              Select a lead to open the agency workspace — profile, conversation, and next actions
               <p className="mt-2 text-xs">
                 Or{" "}
                 <Link href="/agent" className="text-blue-400 hover:underline">
@@ -430,5 +420,19 @@ export default function CRMPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CRMPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-7xl px-4 py-10 text-center text-slate-500 text-sm">
+          Loading CRM…
+        </div>
+      }
+    >
+      <CRMPageContent />
+    </Suspense>
   );
 }
