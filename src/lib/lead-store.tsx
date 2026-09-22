@@ -29,7 +29,6 @@ export interface SessionLead {
   handedOffAt?: string;
   name: string;
   fingerprint: string;
-  /** DEMO — simulated sales follow-up */
   followUpCreated?: boolean;
   followUpCreatedAt?: string;
   followUpStatus?: string;
@@ -37,6 +36,7 @@ export interface SessionLead {
 }
 
 const STORAGE_KEY = "webcraftpro_session_leads_v2";
+const AGENT_CONVERSATION_KEY = "webcraftpro_agent_conversation_v1";
 
 /** DEMO LOGIC — transparent priority heuristics for the investor demo only. */
 export function computePriority(c: {
@@ -70,7 +70,6 @@ function norm(s: string | undefined): string {
     .trim();
 }
 
-/** Fingerprint of qualification fields so the same demo answer updates one record. */
 export function leadFingerprint(c: {
   buyOrRent?: string;
   propertyType?: string;
@@ -241,6 +240,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.removeItem("webcraftpro_session_leads_v1");
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(AGENT_CONVERSATION_KEY);
     } catch {
       /* ignore */
     }
