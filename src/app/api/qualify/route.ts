@@ -61,11 +61,13 @@ function mergeFields(base: Collected, extra: Partial<Collected>): Collected {
   const out: Collected = { ...base };
   for (const f of FIELD_ORDER) {
     if (isValidValue(extra[f])) {
-      // Map preferredLocation from AI into location field
       out[f] = extra[f];
     }
   }
-  if (isValidValue((extra as { preferredLocation?: string }).preferredLocation) && !isValidValue(out.location)) {
+  if (
+    isValidValue((extra as { preferredLocation?: string }).preferredLocation) &&
+    !isValidValue(out.location)
+  ) {
     out.location = (extra as { preferredLocation?: string }).preferredLocation;
   }
   return out;
@@ -124,7 +126,7 @@ function buildSystemPrompt(collected: Collected): string {
 You qualify leads by collecting exactly these five fields:
 1. buyOrRent — Buy, Rent, or Open to either
 2. propertyType — e.g. Apartment, House, Villa, Studio
-3. budget — include currency when known (prefer MAD/dirhams for Morocco)
+3. budget — include currency when known (prefer MAD/dirhams for Morocco); never invent NaN
 4. location — city/area (normalize Casa → Casablanca)
 5. timeline — e.g. ASAP, Within about 3 months, Flexible / Not urgent
 
@@ -133,16 +135,17 @@ Rules:
 - Understand natural English, French, and mixed EN/FR.
 - Understand Moroccan real-estate terms (appart, Casa, dirhams, MAD, etc.).
 - NEVER invent missing information.
-- Preserve previously validated fields; only update a field when the user clearly provides a new value.
+- Preserve previously validated fields.
 - If the user is unsure about buy vs rent, leave buyOrRent empty and ask for clarification.
-- "pas urgent", "je ne suis pas pressé", "not in a hurry" → timeline Flexible / Not urgent (never ASAP).
-- Respond in the user's language when practical (French user → French reply).
-- When all five fields are valid, set isQualified true and summarize briefly.
+- "pas urgent", "je ne suis pas pressé", "not in a hurry" → Flexible / Not urgent (never ASAP).
+- French decimals: "1,5 million de dirhams" → "Around 1.5M MAD".
+- Respond in the user's language when practical.
+- When all five fields are valid, set isQualified true.
 
 Current validated fields:
 ${current}
 
-Respond with ONLY valid JSON (no markdown fences) matching this schema:
+Respond with ONLY valid JSON (no markdown fences):
 {
   "buyOrRent": string | null,
   "propertyType": string | null,
@@ -152,8 +155,7 @@ Respond with ONLY valid JSON (no markdown fences) matching this schema:
   "nextQuestion": string | null,
   "isQualified": boolean,
   "response": string
-}
-Only include non-null field values you are confident about from the conversation.`;
+}`;
 }
 
 async function aiQualify(
@@ -182,14 +184,13 @@ async function aiQualify(
     body: JSON.stringify({
       model: cfg.model,
       temperature: 0.2,
-      response_format: { type: "json_object" },
       messages,
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    console.error("[qualify] AI HTTP error", res.status, errText.slice(0, 200));
+    console.error("[qualify] AI HTTP error", res.status, errText.slice(0, 300));
     return null;
   }
 
@@ -201,7 +202,6 @@ async function aiQualify(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // strip fences if model ignored instruction
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
     try {
       parsed = JSON.parse(cleaned);
@@ -211,29 +211,31 @@ async function aiQualify(
   }
 
   const aiFields: Partial<Collected> = {};
-  if (typeof parsed.buyOrRent === "string" && parsed.buyOrRent.trim())
+  if (typeof parsed.buyOrRent === "string" && isValidValue(parsed.buyOrRent))
     aiFields.buyOrRent = parsed.buyOrRent.trim();
-  if (typeof parsed.propertyType === "string" && parsed.propertyType.trim())
+  if (typeof parsed.propertyType === "string" && isValidValue(parsed.propertyType))
     aiFields.propertyType = parsed.propertyType.trim();
-  if (typeof parsed.budget === "string" && parsed.budget.trim())
+  if (typeof parsed.budget === "string" && isValidValue(parsed.budget))
     aiFields.budget = parsed.budget.trim();
-  if (typeof parsed.preferredLocation === "string" && parsed.preferredLocation.trim())
+  if (typeof parsed.preferredLocation === "string" && isValidValue(parsed.preferredLocation))
     aiFields.location = parsed.preferredLocation.trim();
-  else if (typeof parsed.location === "string" && parsed.location.trim())
+  else if (typeof parsed.location === "string" && isValidValue(parsed.location))
     aiFields.location = parsed.location.trim();
-  if (typeof parsed.timeline === "string" && parsed.timeline.trim())
+  if (typeof parsed.timeline === "string" && isValidValue(parsed.timeline))
     aiFields.timeline = parsed.timeline.trim();
 
-  // Merge AI fields with deterministic extraction as a safety net for numbers/MAD
   const det = extractSignals(latestMessage);
   const merged = mergeFields(collected, { ...det, ...aiFields });
-  // Prefer AI text for fields AI filled; det fills gaps
   for (const f of FIELD_ORDER) {
     if (!isValidValue(merged[f]) && isValidValue(det[f])) merged[f] = det[f];
   }
+  // Prefer deterministic budget when AI budget looks invalid
+  if (!isValidValue(merged.budget) && isValidValue(det.budget)) merged.budget = det.budget;
 
   const isQualified =
-    typeof parsed.isQualified === "boolean" ? parsed.isQualified && allValid(merged) : allValid(merged);
+    typeof parsed.isQualified === "boolean"
+      ? parsed.isQualified && allValid(merged)
+      : allValid(merged);
 
   const response =
     typeof parsed.response === "string" && parsed.response.trim()
@@ -256,7 +258,6 @@ async function aiQualify(
   };
 }
 
-/** GET — whether server AI credentials are configured (never returns the key). */
 export async function GET() {
   const { configured, model } = getAiConfig();
   return NextResponse.json({
