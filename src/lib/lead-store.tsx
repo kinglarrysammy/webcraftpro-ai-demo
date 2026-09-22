@@ -440,51 +440,50 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         if (l.id !== id) return l;
         const actor = l.assignedToName || "Sales";
         switch (action) {
-          case "contact": {
-            const last = (l.activities || [])[(l.activities || []).length - 1];
-            if (last?.type === "Contact Attempted") return l;
-            return {
-              ...l,
-              contactNote: "Contact initiated (demo — no message sent)",
-              recommendedAction: "Mark contacted after outreach",
-              updatedAt: now,
-              activities: [
-                ...(l.activities || []),
-                activity("Contact Attempted", actor, "Demo contact noted — no real message sent"),
-              ],
-            };
-          }
+          case "contact":
           case "mark_contacted": {
-            if (l.pipelineStage === "Contacted" || l.contactedAt) return l;
+            if (l.contactedAt) return l;
             return {
               ...l,
               status: "Contacted",
-              pipelineStage: "Contacted",
+              pipelineStage:
+                l.pipelineStage === "Closed" ||
+                l.pipelineStage === "Lost" ||
+                l.pipelineStage === "Negotiation" ||
+                l.pipelineStage === "Follow-up"
+                  ? l.pipelineStage
+                  : "Contacted",
               contactedAt: now,
+              contactNote: "Contact recorded (demo — no message sent)",
               recommendedAction: "Schedule follow-up if needed",
               updatedAt: now,
               activities: [
                 ...(l.activities || []),
-                activity("Lead Contacted", actor, "Marked as contacted"),
+                activity("Lead Contacted", actor, "Contact recorded"),
               ],
             };
           }
           case "schedule_followup": {
-            if (l.pipelineStage === "Follow-up" && l.scheduledFollowUpAt) return l;
+            if (l.followUpCreated || l.scheduledFollowUpAt) return l;
             return {
               ...l,
               status: "Follow-up Scheduled",
-              pipelineStage: "Follow-up",
+              pipelineStage:
+                l.pipelineStage === "Closed" ||
+                l.pipelineStage === "Lost" ||
+                l.pipelineStage === "Negotiation"
+                  ? l.pipelineStage
+                  : "Follow-up",
               scheduledFollowUpAt: now,
               followUpCreated: true,
-              followUpCreatedAt: l.followUpCreatedAt || now,
-              followUpStatus: "Follow-up Scheduled",
+              followUpCreatedAt: now,
+              followUpStatus: "Follow-up Created",
               followUpRecommendedAction: "Contact lead",
               recommendedAction: "Complete scheduled follow-up",
               updatedAt: now,
               activities: [
                 ...(l.activities || []),
-                activity("Follow-up Scheduled", actor, "Follow-up scheduled (demo)"),
+                activity("Follow-up Created", actor, "Follow-up recorded (demo)"),
               ],
             };
           }
