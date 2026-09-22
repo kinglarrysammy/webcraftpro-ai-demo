@@ -16,6 +16,10 @@ import Link from "next/link";
 type Message = { id: number; role: "ai" | "user"; text: string };
 type Phase = "greeting" | "collecting" | "qualified" | "handoff";
 
+const AGENT_STORAGE_KEY = "webcraftpro_agent_conversation_v1";
+const DEFAULT_GREETING =
+  "Hi — I'm the WebCraftPro AI qualification agent for real estate (demo mode). I can take natural answers; I'll ask one thing at a time and build a clear lead profile. What brings you in today?";
+
 function nextMissing(c: Collected): Field | null {
   for (const f of FIELD_ORDER) {
     if (!isValidValue(c[f])) return f;
@@ -99,15 +103,13 @@ function buildSummary(c: Collected): string {
 }
 
 export default function AgentPage() {
-  const { addQualifiedLead, handoffLead } = useLeadStore();
+  const { addQualifiedLead, handoffLead, clearSessionLeads, sessionLeads } = useLeadStore();
+
+  const [hydrated, setHydrated] = useState(false);
   const [sessionLeadId, setSessionLeadId] = useState<string | null>(null);
   const [handoffDone, setHandoffDone] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      role: "ai",
-      text: "Hi — I'm the WebCraftPro AI qualification agent for real estate (demo mode). I can take natural answers; I'll ask one thing at a time and build a clear lead profile. What brings you in today?",
-    },
+    { id: 1, role: "ai", text: DEFAULT_GREETING },
   ]);
   const [phase, setPhase] = useState<Phase>("greeting");
   const [input, setInput] = useState("");
@@ -117,6 +119,65 @@ export default function AgentPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const collectedRef = useRef(collected);
   collectedRef.current = collected;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AGENT_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          messages?: Message[];
+          phase?: Phase;
+          collected?: Collected;
+          currentField?: Field | null;
+          sessionLeadId?: string | null;
+          handoffDone?: boolean;
+        };
+        if (Array.isArray(saved.messages) && saved.messages.length > 0) {
+          setMessages(saved.messages);
+        }
+        if (saved.phase) setPhase(saved.phase);
+        if (saved.collected && typeof saved.collected === "object") {
+          setCollected(saved.collected);
+          collectedRef.current = saved.collected;
+        }
+        if (saved.currentField !== undefined) setCurrentField(saved.currentField);
+        if (saved.sessionLeadId !== undefined) setSessionLeadId(saved.sessionLeadId);
+        if (typeof saved.handoffDone === "boolean") setHandoffDone(saved.handoffDone);
+      }
+    } catch {
+      /* ignore */
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(
+        AGENT_STORAGE_KEY,
+        JSON.stringify({
+          messages,
+          phase,
+          collected,
+          currentField,
+          sessionLeadId,
+          handoffDone,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [hydrated, messages, phase, collected, currentField, sessionLeadId, handoffDone]);
+
+  useEffect(() => {
+    if (!hydrated || !sessionLeadId) return;
+    const lead = sessionLeads.find((l) => l.id === sessionLeadId);
+    if (!lead) return;
+    if (lead.status === "Handed Off") {
+      setHandoffDone(true);
+      if (phase === "qualified") setPhase("handoff");
+    }
+  }, [hydrated, sessionLeadId, sessionLeads, phase]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -254,13 +315,13 @@ export default function AgentPage() {
   };
 
   const reset = () => {
-    setMessages([
-      {
-        id: 1,
-        role: "ai",
-        text: "Hi — I'm the WebCraftPro AI qualification agent for real estate (demo mode). I can take natural answers; I'll ask one thing at a time and build a clear lead profile. What brings you in today?",
-      },
-    ]);
+    clearSessionLeads();
+    try {
+      localStorage.removeItem(AGENT_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    setMessages([{ id: 1, role: "ai", text: DEFAULT_GREETING }]);
     setPhase("greeting");
     setCollected({});
     collectedRef.current = {};
@@ -272,6 +333,14 @@ export default function AgentPage() {
 
   const progress = FIELD_ORDER.filter((f) => isValidValue(collected[f])).length;
 
+  if (!hydrated) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10 text-center text-slate-500 text-sm">
+        Loading demo session…
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:py-10 flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-9rem)]">
       <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -281,6 +350,9 @@ export default function AgentPage() {
             Natural-language lead qualification ·{" "}
             <span className="text-amber-400/90 font-medium">DEMO MODE</span>
             {" · "}not connected to a production LLM
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Conversation is saved in this browser — navigate freely without losing progress
           </p>
         </div>
         <div className="flex gap-2">
