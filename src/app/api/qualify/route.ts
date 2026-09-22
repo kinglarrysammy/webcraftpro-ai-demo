@@ -29,6 +29,33 @@ interface QualifyResult {
   isQualified: boolean;
   response: string;
   fields: Partial<Collected>;
+  /** Non-secret diagnostics when AI was attempted but fallback was used */
+  aiDiagnostics?: {
+    configured: boolean;
+    model: string;
+    baseHost: string;
+    httpStatus?: number;
+    errorCode?: string;
+    errorType?: string;
+    note?: string;
+  };
+}
+
+function safeHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "invalid-base-url";
+  }
+}
+
+function normalizeBaseUrl(raw: string): string {
+  let u = (raw || "").trim().replace(/\/$/, "");
+  if (!u) return "https://api.openai.com/v1";
+  // Common misconfig: https://api.openai.com without /v1
+  if (/^https?:\/\/api\.openai\.com$/i.test(u)) u = `${u}/v1`;
+  if (/^https?:\/\/api\.x\.ai$/i.test(u)) u = `${u}/v1`;
+  return u;
 }
 
 function getAiConfig() {
@@ -37,15 +64,17 @@ function getAiConfig() {
     process.env.XAI_API_KEY ||
     process.env.OPENAI_API_KEY ||
     "";
-  const baseUrl = (
+  const rawBase =
     process.env.AI_BASE_URL ||
     process.env.XAI_BASE_URL ||
-    (process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1")
-  ).replace(/\/$/, "");
+    (process.env.XAI_API_KEY && !process.env.OPENAI_API_KEY
+      ? "https://api.x.ai/v1"
+      : "https://api.openai.com/v1");
+  const baseUrl = normalizeBaseUrl(rawBase);
   const model =
     process.env.AI_MODEL ||
     process.env.XAI_MODEL ||
-    (process.env.XAI_API_KEY ? "grok-2-latest" : "gpt-4o-mini");
+    (process.env.XAI_API_KEY && !process.env.OPENAI_API_KEY ? "grok-2-latest" : "gpt-4o-mini");
   return { apiKey, baseUrl, model, configured: Boolean(apiKey) };
 }
 
@@ -60,9 +89,7 @@ function allValid(c: Collected): boolean {
 function mergeFields(base: Collected, extra: Partial<Collected>): Collected {
   const out: Collected = { ...base };
   for (const f of FIELD_ORDER) {
-    if (isValidValue(extra[f])) {
-      out[f] = extra[f];
-    }
+    if (isValidValue(extra[f])) out[f] = extra[f];
   }
   if (
     isValidValue((extra as { preferredLocation?: string }).preferredLocation) &&
@@ -73,7 +100,11 @@ function mergeFields(base: Collected, extra: Partial<Collected>): Collected {
   return out;
 }
 
-function fallbackQualify(latestMessage: string, collected: Collected): QualifyResult {
+function fallbackQualify(
+  latestMessage: string,
+  collected: Collected,
+  diagnostics?: QualifyResult["aiDiagnostics"]
+): QualifyResult {
   const signals = extractSignals(latestMessage);
   const merged = mergeFields(collected, signals);
   const missing = missingFields(merged);
@@ -114,6 +145,7 @@ function fallbackQualify(latestMessage: string, collected: Collected): QualifyRe
     isQualified,
     response,
     fields: merged,
+    aiDiagnostics: diagnostics,
   };
 }
 
@@ -158,23 +190,20 @@ Respond with ONLY valid JSON (no markdown fences):
 }`;
 }
 
-async function aiQualify(
-  latestMessage: string,
-  collected: Collected,
-  history: ChatMsg[],
-  cfg: { apiKey: string; baseUrl: string; model: string }
-): Promise<QualifyResult | null> {
-  const messages: { role: string; content: string }[] = [
-    { role: "system", content: buildSystemPrompt(collected) },
-  ];
+type AiCallResult =
+  | { ok: true; result: QualifyResult }
+  | {
+      ok: false;
+      httpStatus?: number;
+      errorCode?: string;
+      errorType?: string;
+      note?: string;
+    };
 
-  for (const m of history.slice(-12)) {
-    const role = m.role === "user" ? "user" : "assistant";
-    const content = m.text || m.content || "";
-    if (content) messages.push({ role, content });
-  }
-  messages.push({ role: "user", content: latestMessage });
-
+async function callChatCompletions(
+  cfg: { apiKey: string; baseUrl: string; model: string },
+  messages: { role: string; content: string }[]
+): Promise<{ ok: true; content: string } | { ok: false; httpStatus: number; errorCode?: string; errorType?: string; note?: string }> {
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -188,26 +217,139 @@ async function aiQualify(
     }),
   });
 
+  const text = await res.text().catch(() => "");
   if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    console.error("[qualify] AI HTTP error", res.status, errText.slice(0, 300));
-    return null;
+    let errorCode: string | undefined;
+    let errorType: string | undefined;
+    try {
+      const j = JSON.parse(text);
+      errorCode = j?.error?.code || j?.error?.error?.code;
+      errorType = j?.error?.type || j?.error?.error?.type;
+      // Never log message bodies that might echo secrets; code/type only
+      console.error(
+        "[qualify] AI HTTP error",
+        res.status,
+        errorCode || "",
+        errorType || "",
+        "model=",
+        cfg.model,
+        "host=",
+        safeHost(cfg.baseUrl)
+      );
+    } catch {
+      console.error(
+        "[qualify] AI HTTP error",
+        res.status,
+        "model=",
+        cfg.model,
+        "host=",
+        safeHost(cfg.baseUrl)
+      );
+    }
+    return {
+      ok: false,
+      httpStatus: res.status,
+      errorCode,
+      errorType,
+      note:
+        res.status === 404 || errorCode === "model_not_found"
+          ? "Model not found for this provider. Check AI_MODEL."
+          : res.status === 401
+            ? "Provider rejected the API key (401)."
+            : res.status === 429
+              ? "Rate limited by provider."
+              : "Provider request failed.",
+    };
   }
 
-  const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content;
-  if (!raw || typeof raw !== "string") return null;
-
-  let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw);
+    const data = JSON.parse(text);
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content || typeof content !== "string") {
+      return { ok: false, httpStatus: 200, note: "Empty model content" };
+    }
+    return { ok: true, content };
+  } catch {
+    return { ok: false, httpStatus: 200, note: "Invalid provider JSON" };
+  }
+}
+
+function parseModelJson(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw);
   } catch {
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      return null;
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        return null;
+      }
     }
+    return null;
+  }
+}
+
+async function aiQualify(
+  latestMessage: string,
+  collected: Collected,
+  history: ChatMsg[],
+  cfg: { apiKey: string; baseUrl: string; model: string }
+): Promise<AiCallResult> {
+  const messages: { role: string; content: string }[] = [
+    { role: "system", content: buildSystemPrompt(collected) },
+  ];
+
+  for (const m of history.slice(-12)) {
+    const role = m.role === "user" ? "user" : "assistant";
+    const content = m.text || m.content || "";
+    if (content) messages.push({ role, content });
+  }
+  messages.push({ role: "user", content: latestMessage });
+
+  let call = await callChatCompletions(cfg, messages);
+
+  // If model is invalid, retry once with a known OpenAI-compatible default (no secret changes)
+  if (
+    !call.ok &&
+    (call.errorCode === "model_not_found" ||
+      call.httpStatus === 404 ||
+      (call.note || "").includes("Model not found"))
+  ) {
+    const fallbackModel =
+      cfg.baseUrl.includes("x.ai") ? "grok-2-latest" : "gpt-4o-mini";
+    if (fallbackModel !== cfg.model) {
+      console.error("[qualify] retrying with fallback model", fallbackModel);
+      call = await callChatCompletions({ ...cfg, model: fallbackModel }, messages);
+      if (call.ok) {
+        // continue with success using fallback model response
+      } else {
+        return {
+          ok: false,
+          httpStatus: call.httpStatus,
+          errorCode: call.errorCode,
+          errorType: call.errorType,
+          note: `Configured model failed; retry with ${fallbackModel} also failed. ${call.note || ""}`.trim(),
+        };
+      }
+    }
+  }
+
+  if (!call.ok) {
+    return {
+      ok: false,
+      httpStatus: call.httpStatus,
+      errorCode: call.errorCode,
+      errorType: call.errorType,
+      note: call.note,
+    };
+  }
+
+  const parsed = parseModelJson(call.content);
+  if (!parsed) {
+    return { ok: false, note: "Model returned non-JSON content" };
   }
 
   const aiFields: Partial<Collected> = {};
@@ -229,7 +371,6 @@ async function aiQualify(
   for (const f of FIELD_ORDER) {
     if (!isValidValue(merged[f]) && isValidValue(det[f])) merged[f] = det[f];
   }
-  // Prefer deterministic budget when AI budget looks invalid
   if (!isValidValue(merged.budget) && isValidValue(det.budget)) merged.budget = det.budget;
 
   const isQualified =
@@ -245,24 +386,28 @@ async function aiQualify(
         : "Could you share a bit more so I can complete the qualification?";
 
   return {
-    mode: "ai",
-    buyOrRent: merged.buyOrRent,
-    propertyType: merged.propertyType,
-    budget: merged.budget,
-    preferredLocation: merged.location,
-    timeline: merged.timeline,
-    nextQuestion: typeof parsed.nextQuestion === "string" ? parsed.nextQuestion : undefined,
-    isQualified,
-    response,
-    fields: merged,
+    ok: true,
+    result: {
+      mode: "ai",
+      buyOrRent: merged.buyOrRent,
+      propertyType: merged.propertyType,
+      budget: merged.budget,
+      preferredLocation: merged.location,
+      timeline: merged.timeline,
+      nextQuestion: typeof parsed.nextQuestion === "string" ? parsed.nextQuestion : undefined,
+      isQualified,
+      response,
+      fields: merged,
+    },
   };
 }
 
 export async function GET() {
-  const { configured, model } = getAiConfig();
+  const { configured, model, baseUrl } = getAiConfig();
   return NextResponse.json({
     aiConfigured: configured,
     model: configured ? model : null,
+    baseHost: configured ? safeHost(baseUrl) : null,
     demoMode: true,
   });
 }
@@ -287,12 +432,37 @@ export async function POST(req: Request) {
   if (cfg.configured) {
     try {
       const ai = await aiQualify(latestMessage, collected, history, cfg);
-      if (ai) return NextResponse.json(ai);
+      if (ai.ok) return NextResponse.json(ai.result);
+      return NextResponse.json(
+        fallbackQualify(latestMessage, collected, {
+          configured: true,
+          model: cfg.model,
+          baseHost: safeHost(cfg.baseUrl),
+          httpStatus: ai.httpStatus,
+          errorCode: ai.errorCode,
+          errorType: ai.errorType,
+          note: ai.note,
+        })
+      );
     } catch (e) {
-      console.error("[qualify] AI exception", e);
+      console.error("[qualify] AI exception", e instanceof Error ? e.name : "error");
+      return NextResponse.json(
+        fallbackQualify(latestMessage, collected, {
+          configured: true,
+          model: cfg.model,
+          baseHost: safeHost(cfg.baseUrl),
+          note: "Unhandled exception during AI call",
+        })
+      );
     }
   }
 
-  const fallback = fallbackQualify(latestMessage, collected);
-  return NextResponse.json(fallback);
+  return NextResponse.json(
+    fallbackQualify(latestMessage, collected, {
+      configured: false,
+      model: cfg.model,
+      baseHost: safeHost(cfg.baseUrl),
+      note: "No AI API key configured",
+    })
+  );
 }
