@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WebCraftPro AI \u2014 Real Estate Automation Platform",
+  title: "WebCraftPro AI — Real Estate Automation Platform",
   description:
     "AI-powered lead qualification & business automation for real-estate companies. Investor demo.",
 };
@@ -30,10 +30,10 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[#0a0f1a] text-slate-100">
         <Providers>
           <Nav />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 pb-8 sm:pb-10">{children}</main>
           <footer className="border-t border-slate-800 py-6 text-center text-sm text-slate-500 px-4">
             <p>
-              WebCraftPro AI \u2014 Investor Demo \u00b7 All metrics labeled as{" "}
+              WebCraftPro AI — Investor Demo · All metrics labeled as{" "}
               <span className="text-amber-400/90 font-medium">DEMO DATA</span>
             </p>
           </footer>
