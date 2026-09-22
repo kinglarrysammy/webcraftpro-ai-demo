@@ -12,7 +12,20 @@ import {
 import type { Collected } from "@/lib/qualify";
 
 export type LeadPriority = "High" | "Medium" | "Low";
-export type SessionLeadStatus = "Qualified" | "Handed Off";
+export type SessionLeadStatus =
+  | "Qualified"
+  | "Handed Off"
+  | "Contacted"
+  | "Follow-up Scheduled"
+  | "Closed";
+
+export type ChatRole = "ai" | "user";
+
+export interface LeadMessage {
+  id: number;
+  role: ChatRole;
+  text: string;
+}
 
 export interface SessionLead {
   id: string;
@@ -33,12 +46,18 @@ export interface SessionLead {
   followUpCreatedAt?: string;
   followUpStatus?: string;
   followUpRecommendedAction?: string;
+  /** Agent conversation for agency review */
+  conversation?: LeadMessage[];
+  contactedAt?: string;
+  contactNote?: string;
+  scheduledFollowUpAt?: string;
+  closedAt?: string;
+  recommendedAction?: string;
 }
 
 const STORAGE_KEY = "webcraftpro_session_leads_v2";
 const AGENT_CONVERSATION_KEY = "webcraftpro_agent_conversation_v1";
 
-/** DEMO LOGIC — transparent priority heuristics for the investor demo only. */
 export function computePriority(c: {
   buyOrRent?: string;
   budget?: string;
@@ -113,12 +132,21 @@ function nextId(existing: SessionLead[]): string {
   return `WP-${String(max + 1).padStart(3, "0")}`;
 }
 
+export type AgencyAction =
+  | "contact"
+  | "mark_contacted"
+  | "schedule_followup"
+  | "mark_qualified"
+  | "mark_closed";
+
 interface LeadStoreValue {
   sessionLeads: SessionLead[];
   latestLead: SessionLead | null;
-  addQualifiedLead: (c: Collected) => SessionLead;
+  addQualifiedLead: (c: Collected, conversation?: LeadMessage[]) => SessionLead;
   handoffLead: (id: string) => void;
   createFollowUp: (id: string) => SessionLead | null;
+  syncLeadConversation: (id: string, conversation: LeadMessage[]) => void;
+  applyAgencyAction: (id: string, action: AgencyAction) => void;
   clearSessionLeads: () => void;
 }
 
@@ -145,59 +173,69 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     if (hydrated) saveLeads(sessionLeads);
   }, [sessionLeads, hydrated]);
 
-  const addQualifiedLead = useCallback((c: Collected): SessionLead => {
-    const fp = leadFingerprint(c);
-    const now = new Date().toISOString();
-    let result!: SessionLead;
+  const addQualifiedLead = useCallback(
+    (c: Collected, conversation?: LeadMessage[]): SessionLead => {
+      const fp = leadFingerprint(c);
+      const now = new Date().toISOString();
+      let result!: SessionLead;
 
-    setSessionLeads((prev) => {
-      const existingIdx = prev.findIndex((l) => l.fingerprint === fp);
-      if (existingIdx >= 0) {
-        const prevLead = prev[existingIdx];
+      setSessionLeads((prev) => {
+        const existingIdx = prev.findIndex((l) => l.fingerprint === fp);
+        if (existingIdx >= 0) {
+          const prevLead = prev[existingIdx];
+          result = {
+            ...prevLead,
+            updatedAt: now,
+            buyOrRent: c.buyOrRent || prevLead.buyOrRent,
+            propertyType: c.propertyType || prevLead.propertyType,
+            budget: c.budget || prevLead.budget,
+            preferredLocation: c.location || prevLead.preferredLocation,
+            timeline: c.timeline || prevLead.timeline,
+            status: "Qualified",
+            priority: computePriority(c),
+            handedOffAt: undefined,
+            followUpCreated: false,
+            followUpCreatedAt: undefined,
+            followUpStatus: undefined,
+            followUpRecommendedAction: undefined,
+            contactedAt: undefined,
+            scheduledFollowUpAt: undefined,
+            closedAt: undefined,
+            recommendedAction: "Review qualification",
+            conversation: conversation?.length ? conversation : prevLead.conversation,
+            name: `AI Lead · ${c.location || c.propertyType || "New"}`,
+            fingerprint: fp,
+          };
+          const next = [...prev];
+          next.splice(existingIdx, 1);
+          return [result, ...next];
+        }
+
+        const id = nextId(prev);
         result = {
-          ...prevLead,
+          id,
+          createdAt: now,
           updatedAt: now,
-          buyOrRent: c.buyOrRent || prevLead.buyOrRent,
-          propertyType: c.propertyType || prevLead.propertyType,
-          budget: c.budget || prevLead.budget,
-          preferredLocation: c.location || prevLead.preferredLocation,
-          timeline: c.timeline || prevLead.timeline,
+          buyOrRent: c.buyOrRent || "—",
+          propertyType: c.propertyType || "—",
+          budget: c.budget || "—",
+          preferredLocation: c.location || "—",
+          timeline: c.timeline || "—",
           status: "Qualified",
+          source: "AI Agent",
           priority: computePriority(c),
-          handedOffAt: undefined,
-          followUpCreated: false,
-          followUpCreatedAt: undefined,
-          followUpStatus: undefined,
-          followUpRecommendedAction: undefined,
-          name: `AI Lead \u00b7 ${c.location || c.propertyType || "New"}`,
+          name: `AI Lead · ${c.location || c.propertyType || "New"}`,
           fingerprint: fp,
+          conversation: conversation || [],
+          recommendedAction: "Review qualification",
         };
-        const next = [...prev];
-        next.splice(existingIdx, 1);
-        return [result, ...next];
-      }
+        return [result, ...prev];
+      });
 
-      const id = nextId(prev);
-      result = {
-        id,
-        createdAt: now,
-        updatedAt: now,
-        buyOrRent: c.buyOrRent || "\u2014",
-        propertyType: c.propertyType || "\u2014",
-        budget: c.budget || "\u2014",
-        preferredLocation: c.location || "\u2014",
-        timeline: c.timeline || "\u2014",
-        status: "Qualified",
-        source: "AI Agent",
-        priority: computePriority(c),
-        name: `AI Lead \u00b7 ${c.location || c.propertyType || "New"}`,
-        fingerprint: fp,
-      };
-      return [result, ...prev];
-    });
-
-    return result;
-  }, []);
+      return result;
+    },
+    []
+  );
 
   const handoffLead = useCallback((id: string) => {
     setSessionLeads((prev) =>
@@ -208,6 +246,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
               status: "Handed Off" as const,
               handedOffAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
+              recommendedAction: "Contact lead",
             }
           : l
       )
@@ -226,12 +265,79 @@ export function LeadProvider({ children }: { children: ReactNode }) {
           followUpCreatedAt: now,
           followUpStatus: "Follow-up Created",
           followUpRecommendedAction: "Contact lead",
+          recommendedAction: "Contact lead",
           updatedAt: now,
         };
         return updated;
       })
     );
     return updated;
+  }, []);
+
+  const syncLeadConversation = useCallback((id: string, conversation: LeadMessage[]) => {
+    setSessionLeads((prev) =>
+      prev.map((l) =>
+        l.id === id
+          ? { ...l, conversation, updatedAt: new Date().toISOString() }
+          : l
+      )
+    );
+  }, []);
+
+  const applyAgencyAction = useCallback((id: string, action: AgencyAction) => {
+    const now = new Date().toISOString();
+    setSessionLeads((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        switch (action) {
+          case "contact":
+            return {
+              ...l,
+              contactNote: "Contact initiated (demo — no message sent)",
+              recommendedAction: "Mark contacted after outreach",
+              updatedAt: now,
+            };
+          case "mark_contacted":
+            return {
+              ...l,
+              status: "Contacted",
+              contactedAt: now,
+              recommendedAction: "Schedule follow-up if needed",
+              updatedAt: now,
+            };
+          case "schedule_followup":
+            return {
+              ...l,
+              status: "Follow-up Scheduled",
+              scheduledFollowUpAt: now,
+              followUpCreated: true,
+              followUpCreatedAt: l.followUpCreatedAt || now,
+              followUpStatus: "Follow-up Scheduled",
+              followUpRecommendedAction: "Contact lead",
+              recommendedAction: "Complete scheduled follow-up",
+              updatedAt: now,
+            };
+          case "mark_qualified":
+            return {
+              ...l,
+              status: "Qualified",
+              recommendedAction: "Human handoff or contact",
+              closedAt: undefined,
+              updatedAt: now,
+            };
+          case "mark_closed":
+            return {
+              ...l,
+              status: "Closed",
+              closedAt: now,
+              recommendedAction: "—",
+              updatedAt: now,
+            };
+          default:
+            return l;
+        }
+      })
+    );
   }, []);
 
   const clearSessionLeads = useCallback(() => {
@@ -255,9 +361,20 @@ export function LeadProvider({ children }: { children: ReactNode }) {
       addQualifiedLead,
       handoffLead,
       createFollowUp,
+      syncLeadConversation,
+      applyAgencyAction,
       clearSessionLeads,
     }),
-    [sessionLeads, latestLead, addQualifiedLead, handoffLead, createFollowUp, clearSessionLeads]
+    [
+      sessionLeads,
+      latestLead,
+      addQualifiedLead,
+      handoffLead,
+      createFollowUp,
+      syncLeadConversation,
+      applyAgencyAction,
+      clearSessionLeads,
+    ]
   );
 
   return <LeadStoreContext.Provider value={value}>{children}</LeadStoreContext.Provider>;
