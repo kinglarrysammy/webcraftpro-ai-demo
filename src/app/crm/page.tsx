@@ -103,12 +103,10 @@ function CRMPageContent() {
   }, [sessionLeads, selectedId, leadFromUrl]);
 
   const selected = rows.find((r) => r.lead.id === selectedId);
-  const sessionSelected =
-    selected?.kind === "session" ? (selected.lead as SessionLead) : null;
 
   const runAction = (action: AgencyAction) => {
-    if (!sessionSelected) return;
-    applyAgencyAction(sessionSelected.id, action);
+    if (!selected || selected.kind !== "session") return;
+    applyAgencyAction(selected.lead.id, action);
     const labels: Record<AgencyAction, string> = {
       contact: "Contact noted (demo — no WhatsApp/email sent)",
       mark_contacted: "Pipeline → Contacted",
@@ -122,10 +120,13 @@ function CRMPageContent() {
     setShowAssign(false);
   };
 
-  const stage = sessionSelected?.pipelineStage || "AI Qualified";
+  const stage =
+    selected?.kind === "session"
+      ? selected.lead.pipelineStage || "AI Qualified"
+      : "AI Qualified";
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 pb-10">
       <div className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-white">Agency CRM</h1>
         <p className="mt-1 text-slate-400 text-sm">
@@ -133,7 +134,8 @@ function CRMPageContent() {
           <span className="text-amber-400/90 font-medium">DEMO MODE</span>
         </p>
         <p className="mt-1 text-[11px] text-slate-500">
-          Agency sales pipeline is separate from the automation workflow · no real WhatsApp, email, or external CRM
+          Agency sales pipeline is separate from the automation workflow · no real WhatsApp, email, or
+          external CRM
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {sessionLeads.length > 0 && (
@@ -160,7 +162,6 @@ function CRMPageContent() {
         </div>
       </div>
 
-      {/* Pipeline overview */}
       <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="flex items-center justify-between gap-2 mb-3">
           <h2 className="text-sm font-semibold text-white">Agency sales pipeline</h2>
@@ -194,7 +195,6 @@ function CRMPageContent() {
       )}
 
       <div className="grid lg:grid-cols-5 gap-4 sm:gap-6">
-        {/* LIST */}
         <div className="lg:col-span-2 rounded-xl border border-slate-800 overflow-hidden">
           <div className="border-b border-slate-800 bg-slate-900/60 px-4 py-3 flex justify-between">
             <h2 className="font-semibold text-white text-sm">Leads</h2>
@@ -249,9 +249,7 @@ function CRMPageContent() {
                           : "Unassigned"}
                       </span>
                       {lastAct && (
-                        <span className="text-slate-600 truncate w-full">
-                          Last: {lastAct.type}
-                        </span>
+                        <span className="text-slate-600 truncate w-full">Last: {lastAct.type}</span>
                       )}
                     </div>
                   )}
@@ -261,11 +259,9 @@ function CRMPageContent() {
           </div>
         </div>
 
-        {/* DETAIL */}
         <div className="lg:col-span-3 space-y-4">
           {selected && selected.kind === "session" ? (
             <>
-              {/* A. Header */}
               <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -295,7 +291,6 @@ function CRMPageContent() {
                 </div>
               </div>
 
-              {/* B. Qualification */}
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <h4 className="text-sm font-semibold text-white mb-3">Qualification</h4>
                 <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
@@ -316,7 +311,6 @@ function CRMPageContent() {
                 </dl>
               </div>
 
-              {/* D. Sales actions */}
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <h4 className="text-sm font-semibold text-white mb-2">Sales actions</h4>
                 <p className="text-[11px] text-slate-500 mb-3">
@@ -359,7 +353,11 @@ function CRMPageContent() {
                   >
                     {selected.lead.assignedTo ? "Reassign Lead" : "Assign Lead"}
                   </button>
-                  {selected.lead.status === "Qualified" && (
+                  {selected.lead.handedOffAt || selected.lead.status === "Handed Off" ? (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Handed Off
+                    </span>
+                  ) : selected.lead.status === "Qualified" ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -370,7 +368,7 @@ function CRMPageContent() {
                     >
                       Human Handoff
                     </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => runAction("contact")}
@@ -378,20 +376,32 @@ function CRMPageContent() {
                   >
                     Contact Lead
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => runAction("mark_contacted")}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
-                  >
-                    Mark Contacted
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runAction("schedule_followup")}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
-                  >
-                    Schedule Follow-up
-                  </button>
+                  {selected.lead.contactedAt || selected.lead.pipelineStage === "Contacted" ? (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Contacted
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => runAction("mark_contacted")}
+                      className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
+                    >
+                      Mark Contacted
+                    </button>
+                  )}
+                  {selected.lead.pipelineStage === "Follow-up" && selected.lead.scheduledFollowUpAt ? (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Follow-up
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => runAction("schedule_followup")}
+                      className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
+                    >
+                      Schedule Follow-up
+                    </button>
+                  )}
                   {!selected.lead.followUpCreated &&
                     (selected.lead.status === "Handed Off" ||
                       selected.lead.status === "Contacted") && (
@@ -406,13 +416,24 @@ function CRMPageContent() {
                         Create Follow-up
                       </button>
                     )}
-                  <button
-                    type="button"
-                    onClick={() => runAction("negotiate")}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
-                  >
-                    Move to Negotiation
-                  </button>
+                  {selected.lead.followUpCreated && (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Follow-up Created
+                    </span>
+                  )}
+                  {selected.lead.pipelineStage === "Negotiation" ? (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Negotiation
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => runAction("negotiate")}
+                      className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
+                    >
+                      Move to Negotiation
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => runAction("mark_qualified")}
@@ -420,27 +441,38 @@ function CRMPageContent() {
                   >
                     Mark Qualified
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => runAction("mark_closed")}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
-                  >
-                    Mark Closed
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runAction("mark_lost")}
-                    className="rounded-lg border border-rose-600/40 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 min-h-[36px]"
-                  >
-                    Mark Lost
-                  </button>
+                  {selected.lead.pipelineStage === "Closed" || selected.lead.closedAt ? (
+                    <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400 min-h-[36px] inline-flex items-center">
+                      ✓ Closed
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => runAction("mark_closed")}
+                      className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 min-h-[36px]"
+                    >
+                      Mark Closed
+                    </button>
+                  )}
+                  {selected.lead.pipelineStage === "Lost" || selected.lead.lostAt ? (
+                    <span className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 min-h-[36px] inline-flex items-center">
+                      ✓ Lost
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => runAction("mark_lost")}
+                      className="rounded-lg border border-rose-600/40 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 min-h-[36px]"
+                    >
+                      Mark Lost
+                    </button>
+                  )}
                 </div>
                 <p className="mt-3 text-[11px] text-slate-500">
                   DEMO MODE — no real WhatsApp, email, or external CRM actions are being performed
                 </p>
               </div>
 
-              {/* C. Conversation */}
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
                 <div className="flex items-center justify-between mb-3 gap-2">
                   <h4 className="text-sm font-semibold text-white">AI conversation</h4>
@@ -481,8 +513,7 @@ function CRMPageContent() {
                 )}
               </div>
 
-              {/* E. Activity timeline */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5 mb-4">
                 <h4 className="text-sm font-semibold text-white mb-3">Activity timeline</h4>
                 {selected.lead.activities && selected.lead.activities.length > 0 ? (
                   <ol className="space-y-3 border-l border-slate-700 ml-2 pl-4">
@@ -491,9 +522,7 @@ function CRMPageContent() {
                         <span className="absolute -left-[1.35rem] top-1.5 h-2 w-2 rounded-full bg-blue-500" />
                         <p className="text-[10px] text-slate-500">{fmt(a.timestamp)}</p>
                         <p className="text-sm text-slate-200 font-medium">{a.type}</p>
-                        {a.actor && (
-                          <p className="text-xs text-slate-400">{a.actor}</p>
-                        )}
+                        {a.actor && <p className="text-xs text-slate-400">{a.actor}</p>}
                         {a.description && (
                           <p className="text-xs text-slate-500">{a.description}</p>
                         )}
@@ -527,9 +556,6 @@ function CRMPageContent() {
                   <dd className="text-slate-200">{selected.lead.nextAction}</dd>
                 </div>
               </dl>
-              <p className="mt-3 text-[11px] text-slate-500">
-                Sample timeline not available — use session leads from the AI Agent for full activity history.
-              </p>
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center text-slate-500 text-sm">
