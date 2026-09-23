@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 /**
@@ -22,11 +22,15 @@ export async function createClient() {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(
+        cookiesToSet: { name: string; value: string; options: CookieOptions }[]
+      ) {
         try {
-          cookiesToSet.forEach((cookie) => {
-            cookieStore.set(cookie.name, cookie.value, cookie.options);
-          });
+          cookiesToSet.forEach(
+            (cookie: { name: string; value: string; options: CookieOptions }) => {
+              cookieStore.set(cookie.name, cookie.value, cookie.options);
+            }
+          );
         } catch {
           // Called from a Server Component where cookies cannot be set — safe to ignore.
         }
