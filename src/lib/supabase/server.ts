@@ -22,16 +22,10 @@ export async function createClient() {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(
-        cookiesToSet: {
-          name: string;
-          value: string;
-          options?: Record<string, unknown>;
-        }[]
-      ) {
+      setAll(cookiesToSet) {
         try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
+          cookiesToSet.forEach((cookie) => {
+            cookieStore.set(cookie.name, cookie.value, cookie.options);
           });
         } catch {
           // Called from a Server Component where cookies cannot be set — safe to ignore.
