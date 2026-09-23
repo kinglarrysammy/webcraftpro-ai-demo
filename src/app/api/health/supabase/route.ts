@@ -9,6 +9,13 @@ export const dynamic = "force-dynamic";
 
 const DEMO_ORG_SLUG = "demo-agency";
 
+interface AgentRow {
+  id: string;
+  display_name: string;
+  title: string | null;
+  is_demo: boolean;
+}
+
 /**
  * Phase 0 read-only connectivity check.
  * - Does not touch leads
@@ -103,7 +110,7 @@ export async function GET() {
       );
     }
 
-    const agentList = agents ?? [];
+    const agentList = (agents ?? []) as AgentRow[];
     const agentNames = agentList.map((a) => a.display_name);
 
     return NextResponse.json({
@@ -126,7 +133,6 @@ export async function GET() {
   } catch (err) {
     const safeMessage =
       err instanceof Error ? err.message : "Unexpected server error";
-    // Avoid leaking connection strings or keys if present in error text
     const scrubbed = safeMessage
       .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[redacted]")
       .replace(/https?:\/\/[^\s]+/g, "[url]");
