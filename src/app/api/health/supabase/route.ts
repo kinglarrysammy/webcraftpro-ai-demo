@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import type { PostgrestError } from "@supabase/supabase-js";
 import {
   createAdminClient,
+  getSupabaseUrlDiagnostics,
   isSupabaseAdminConfigured,
 } from "@/lib/supabase/admin";
 
@@ -16,16 +18,38 @@ interface AgentRow {
   is_demo: boolean;
 }
 
+/** Scrub JWTs and long token-like strings from diagnostic text. */
+function scrubSecrets(text: string | null | undefined): string | null {
+  if (text == null || text === "") return text ?? null;
+  return text
+    .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[redacted]")
+    .replace(/\bsb_secret_[a-zA-Z0-9]+/gi, "[redacted]")
+    .replace(/\bservice_role\b[^\s]*/gi, "[redacted]");
+}
+
+function toSafeSupabaseError(error: PostgrestError | null | undefined) {
+  if (!error) return null;
+  return {
+    message: scrubSecrets(error.message),
+    code: error.code ?? null,
+    details: scrubSecrets(error.details),
+    hint: scrubSecrets(error.hint),
+  };
+}
+
 /**
  * Phase 0 read-only connectivity check.
  * - Does not touch leads
  * - Does not change Agent/CRM behavior
- * - Never returns secrets
+ * - Never returns secrets or env values
  */
 export async function GET() {
   const urlConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const anonConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   const serviceConfigured = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const urlDiagnostics = getSupabaseUrlDiagnostics(
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
 
   if (!isSupabaseAdminConfigured()) {
     return NextResponse.json(
@@ -39,6 +63,7 @@ export async function GET() {
           anonKey: anonConfigured,
           serviceRoleKey: serviceConfigured,
         },
+        urlDiagnostics,
       },
       { status: 503 }
     );
@@ -59,7 +84,8 @@ export async function GET() {
           ok: false,
           phase: 0,
           message: "Failed to query organizations",
-          errorCode: orgError.code ?? "query_error",
+          supabaseError: toSafeSupabaseError(orgError),
+          urlDiagnostics,
           configured: {
             url: urlConfigured,
             anonKey: anonConfigured,
@@ -76,6 +102,7 @@ export async function GET() {
           ok: false,
           phase: 0,
           message: `Demo organization not found (slug=${DEMO_ORG_SLUG})`,
+          urlDiagnostics,
           configured: {
             url: urlConfigured,
             anonKey: anonConfigured,
@@ -98,8 +125,9 @@ export async function GET() {
           ok: false,
           phase: 0,
           message: "Failed to query agents",
-          errorCode: agentsError.code ?? "query_error",
+          supabaseError: toSafeSupabaseError(agentsError),
           org: { name: org.name, slug: org.slug },
+          urlDiagnostics,
           configured: {
             url: urlConfigured,
             anonKey: anonConfigured,
@@ -123,6 +151,7 @@ export async function GET() {
       },
       agentCount: agentList.length,
       agents: agentNames,
+      urlDiagnostics,
       configured: {
         url: urlConfigured,
         anonKey: anonConfigured,
@@ -133,15 +162,14 @@ export async function GET() {
   } catch (err) {
     const safeMessage =
       err instanceof Error ? err.message : "Unexpected server error";
-    const scrubbed = safeMessage
-      .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[redacted]")
-      .replace(/https?:\/\/[^\s]+/g, "[url]");
+    const scrubbed = scrubSecrets(safeMessage) ?? "Unexpected server error";
 
     return NextResponse.json(
       {
         ok: false,
         phase: 0,
         message: scrubbed,
+        urlDiagnostics,
         configured: {
           url: urlConfigured,
           anonKey: anonConfigured,
